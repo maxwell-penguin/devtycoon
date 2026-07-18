@@ -15,13 +15,15 @@ PlanetHustleConfig.Rideshare = {
 PlanetHustleConfig.Lottery = {
 	unlockCost = 500,
 	ticketPrice = 20,
-	-- Weighted outcomes, must sum to 1. payoutMultiplier is applied to ticketPrice.
-	-- For smallLoss, payoutMultiplier is rolled between min/max at resolve time.
+	cooldown = 3, -- seconds between pulls per player per booth
+	-- Weighted outcomes, weights sum to 1. Multiplier rolled uniformly in
+	-- [minMultiplier, maxMultiplier] once outcome is picked. Theoretical
+	-- expected multiplier ≈ 0.9475 (~5% house edge on the $20 ticket).
 	outcomes = {
-		{ name = "smallLoss", weight = 0.60, minMultiplier = 0, maxMultiplier = 0.5 },
-		{ name = "modestWin", weight = 0.30, minMultiplier = 2, maxMultiplier = 3 },
-		{ name = "bigWin", weight = 0.09, minMultiplier = 5, maxMultiplier = 10 },
-		{ name = "jackpot", weight = 0.01, minMultiplier = 50, maxMultiplier = 100 },
+		{ name = "smallLoss", weight = 0.75, minMultiplier = 0, maxMultiplier = 0.4 },
+		{ name = "modestWin", weight = 0.20, minMultiplier = 1.5, maxMultiplier = 2.5 },
+		{ name = "bigWin", weight = 0.045, minMultiplier = 4, maxMultiplier = 7 },
+		{ name = "jackpot", weight = 0.005, minMultiplier = 20, maxMultiplier = 40 },
 	},
 }
 

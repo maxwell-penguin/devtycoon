@@ -30,4 +30,18 @@ function NumberFormatter.Format(n: number): string
 	return sign .. string.format("%.1f%s", scaled, SUFFIXES[magnitude + 1])
 end
 
+-- Full integer with thousands separators — for the HUD cash counter where
+-- the design brief calls for "$1,234,567" style, not K/M/B abbreviation.
+function NumberFormatter.WithCommas(n: number): string
+	local s = tostring(math.floor(math.abs(n)))
+	while true do
+		local next, count = s:gsub("^(%d+)(%d%d%d)", "%1,%2")
+		s = next
+		if count == 0 then
+			break
+		end
+	end
+	return (n < 0 and "-" or "") .. s
+end
+
 return NumberFormatter

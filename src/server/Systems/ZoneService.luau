@@ -7,7 +7,9 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local Config = require(ReplicatedStorage.Shared.Config.PlanetHustleConfig)
 local EconomyService = require(script.Parent.EconomyService)
+local LotteryService = require(script.Parent.LotteryService)
 local NumberFormatter = require(ReplicatedStorage.Shared.Modules.NumberFormatter)
 
 local ZoneService = {}
@@ -20,6 +22,7 @@ type ZoneDef = {
 	size: Vector3,
 	lockedColor: Color3,
 	ownedColor: Color3,
+	onPurchase: ((zoneFloor: BasePart) -> ())?,
 }
 
 local ZONES: { ZoneDef } = {
@@ -31,6 +34,18 @@ local ZONES: { ZoneDef } = {
 		size = Vector3.new(12, 1, 12),
 		lockedColor = Color3.fromRGB(60, 60, 90),
 		ownedColor = Color3.fromRGB(85, 200, 120),
+	},
+	{
+		id = "lottery",
+		name = "Lottery Ticket Booth",
+		price = Config.Lottery.unlockCost,
+		position = Vector3.new(-50, 0.5, 0),
+		size = Vector3.new(12, 1, 12),
+		lockedColor = Color3.fromRGB(70, 40, 90),
+		ownedColor = Color3.fromRGB(180, 90, 220),
+		onPurchase = function(zoneFloor)
+			LotteryService.ActivateBooth(zoneFloor)
+		end,
 	},
 }
 
@@ -194,6 +209,9 @@ function ZoneService.SyncPlayerZones(player: Player)
 			local floor = zoneFloors[zone.id]
 			if floor then
 				applyOwnedVisuals(floor, zone, false)
+				if zone.onPurchase then
+					zone.onPurchase(floor)
+				end
 			end
 		end
 	end
@@ -224,6 +242,9 @@ function ZoneService.AttemptPurchase(player: Player, zoneId: string): boolean
 
 	applyOwnedVisuals(floor, zone, true)
 	showFloatingText(floor, "PURCHASED!", Color3.fromRGB(85, 255, 127))
+	if zone.onPurchase then
+		zone.onPurchase(floor)
+	end
 	return true
 end
 
