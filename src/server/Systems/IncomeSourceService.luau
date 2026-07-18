@@ -31,6 +31,36 @@ local function pulseHouse(house: BasePart)
 	TweenService:Create(house, TweenInfo.new(0.5, Enum.EasingStyle.Sine), { Color = original }):Play()
 end
 
+local function showFloatingReward(house: BasePart, reward: number)
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "FloatingReward"
+	gui.Adornee = house
+	gui.Size = UDim2.new(0, 120, 0, 48)
+	gui.StudsOffset = Vector3.new(0, 5, 0)
+	gui.AlwaysOnTop = true
+	gui.MaxDistance = 60
+	gui.Parent = house
+
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(85, 255, 127)
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.TextStrokeTransparency = 0.3
+	label.Text = "+$" .. reward
+	label.Parent = gui
+
+	local info = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(gui, info, { StudsOffset = Vector3.new(0, 9, 0) }):Play()
+	TweenService:Create(label, info, { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+
+	task.delay(0.85, function()
+		gui:Destroy()
+	end)
+end
+
 local function spawnDoorDashHouses(): Folder
 	local existing = workspace:FindFirstChild("DoorDashHouses")
 	if existing then
@@ -112,6 +142,7 @@ function IncomeSourceService.HandleDoorDashDelivery(player: Player, house: BaseP
 	local reward = math.random(Config.DoorDash.minReward, Config.DoorDash.maxReward)
 	EconomyService.AddCash(player, reward)
 	task.spawn(pulseHouse, house)
+	showFloatingReward(house, reward)
 	return reward
 end
 
