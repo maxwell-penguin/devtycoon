@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm src/server/init.server.luau src/client/init.client.luau src/shared/Hello.luau)",
+      "Bash(mkdir -p src/server/Systems src/client/UI src/shared/Config src/shared/Modules)",
+      "Bash(rokit install *)",
+      "Bash(rojo build *)",
+      "Bash(grep -o 'name=\"Main\"\\\\|name=\"Systems\"\\\\|name=\"EconomyService\"\\\\|name=\"ZoneService\"\\\\|name=\"IncomeSourceService\"\\\\|name=\"LotteryService\"\\\\|name=\"UI\"\\\\|name=\"HUDController\"\\\\|name=\"PurchasePromptUI\"\\\\|name=\"LotteryUI\"\\\\|name=\"Config\"\\\\|name=\"Modules\"\\\\|name=\"PlanetHustleConfig\"\\\\|name=\"NumberFormatter\"\\\\|name=\"Signal\"\\\\|name=\"Server\"\\\\|name=\"Client\"\\\\|name=\"Shared\"' /tmp/planet-hustle-check.rbxlx | sort | uniq -c)",
+      "Read(//private/tmp/**)",
+      "Bash(rm /tmp/planet-hustle-check.rbxlx)",
+      "Bash(claude mcp *)",
+      "mcp__robloxstudio__get_connected_instances"
+    ],
+    "additionalDirectories": [
+      "/private/tmp"
+    ]
+  }
+}
