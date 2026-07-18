@@ -19,6 +19,7 @@ LotteryService.Init()
 local function onPlayerAdded(player: Player)
 	EconomyService.LoadPlayer(player)
 	IncomeSourceService.SetupPlayer(player)
+	ZoneService.SyncPlayerZones(player)
 end
 
 local function onPlayerRemoving(player: Player)
