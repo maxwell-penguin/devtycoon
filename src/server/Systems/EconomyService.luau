@@ -3,7 +3,10 @@
 -- systems (ZoneService, IncomeSourceService) read/write through it rather
 -- than keeping their own copy, so there's one source of truth to save.
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")
+
+local Config = require(ReplicatedStorage.Shared.Config.PlanetHustleConfig)
 
 local AUTOSAVE_INTERVAL = 60
 local MAX_SAVE_ATTEMPTS = 3
@@ -12,11 +15,28 @@ local playerStore = DataStoreService:GetDataStore("PlanetHustle_PlayerData_v1")
 
 local EconomyService = {}
 
--- profiles[player] = { cash: number, ownedZones: {[zoneId]: true} }
-local profiles: { [Player]: { cash: number, ownedZones: { [string]: boolean } } } = {}
+-- profiles[player] = { cash, ownedZones: {[zoneId]: true}, doorDash: {...} }
+type DoorDashState = {
+	valueTier: number, -- 0 = none, index into Config.DoorDash.valueTiers otherwise
+	speedTier: number,
+	hasManager: boolean,
+	scaleTier: number, -- 0 = "Houses", index into Config.DoorDash.scaleTiers otherwise
+	houseCount: number,
+}
+local profiles: { [Player]: { cash: number, ownedZones: { [string]: boolean }, doorDash: DoorDashState } } = {}
+
+local function defaultDoorDash(): DoorDashState
+	return {
+		valueTier = 0,
+		speedTier = 0,
+		hasManager = false,
+		scaleTier = 0,
+		houseCount = Config.DoorDash.startingHouseCount,
+	}
+end
 
 local function defaultProfile()
-	return { cash = 0, ownedZones = {} }
+	return { cash = 0, ownedZones = {}, doorDash = defaultDoorDash() }
 end
 
 local function withRetry(fn: () -> any): (boolean, any)
@@ -51,6 +71,10 @@ function EconomyService.LoadPlayer(player: Player)
 	end)
 
 	profiles[player] = (ok and saved) or defaultProfile()
+	if not profiles[player].doorDash then
+		-- Migrates saves from before the DoorDash progression system existed.
+		profiles[player].doorDash = defaultDoorDash()
+	end
 
 	local leaderstats = Instance.new("Folder")
 	leaderstats.Name = "leaderstats"
@@ -136,6 +160,25 @@ end
 function EconomyService.GetOwnedZones(player: Player): { [string]: boolean }
 	local profile = profiles[player]
 	return profile and profile.ownedZones or {}
+end
+
+--------------------------------------------------------------------------------
+-- DOOR DASH PROGRESSION (persisted alongside cash)
+--------------------------------------------------------------------------------
+
+function EconomyService.GetDoorDashState(player: Player): DoorDashState?
+	local profile = profiles[player]
+	return profile and profile.doorDash
+end
+
+function EconomyService.UpdateDoorDash(player: Player, patch: { [string]: any })
+	local profile = profiles[player]
+	if not profile then
+		return
+	end
+	for key, value in pairs(patch) do
+		(profile.doorDash :: any)[key] = value
+	end
 end
 
 --------------------------------------------------------------------------------
