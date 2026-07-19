@@ -341,7 +341,7 @@ local function buildRideshareCurbDetails(zoneModel: Model, floor: BasePart, taxi
 	signBoard.Parent = zoneModel
 
 	local signGui = Instance.new("SurfaceGui")
-	signGui.Face = Enum.NormalId.Front
+	signGui.Face = Enum.NormalId.Back
 	signGui.Parent = signBoard
 	local signLabel = Instance.new("TextLabel")
 	signLabel.BackgroundTransparency = 1

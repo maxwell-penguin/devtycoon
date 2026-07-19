@@ -71,7 +71,7 @@ local ZONES: { ZoneDef } = {
 		size = Vector3.new(12, 1, 12),
 		ownedColor = Theme.Secondary,
 		buildHero = function(zoneModel, floor)
-			return buildPlaceholderHero(zoneModel, floor, Theme.Secondary, Vector3.new(12, 1, 12))
+			return LotteryService.BuildBoothHero(zoneModel, floor)
 		end,
 		onPurchase = function(_owner, zoneFloor)
 			LotteryService.ActivateBooth(zoneFloor)
