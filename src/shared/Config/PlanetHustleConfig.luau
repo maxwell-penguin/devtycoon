@@ -2,6 +2,10 @@
 local PlanetHustleConfig = {}
 
 PlanetHustleConfig.DoorDash = {
+	-- No longer the always-free starter (Dog Walking took that role) - a
+	-- cheap one-time unlock inside the shared per-plot neighborhood instead.
+	unlockCost = 100,
+
 	minReward = 1,
 	maxReward = 3,
 	cooldown = 3, -- seconds per house, tier 0 (no Speed upgrade)
@@ -66,7 +70,8 @@ PlanetHustleConfig.Lottery = {
 }
 
 PlanetHustleConfig.DogWalking = {
-	unlockCost = 800,
+	-- Now the always-free starter (swapped roles with DoorDash) - no
+	-- unlockCost, available the moment a player's plot exists.
 	rewardPerLoop = 15,
 	cooldown = 10,
 }

@@ -62,20 +62,6 @@ local ZONES: { ZoneDef } = {
 		end,
 	},
 	{
-		id = "dog_walking",
-		name = "Dog Walking Service",
-		price = Config.DogWalking.unlockCost,
-		position = Vector3.new(50, 0.5, 50),
-		size = Vector3.new(12, 1, 12),
-		ownedColor = Color3.fromRGB(200, 160, 100),
-		buildHero = function(zoneModel, floor)
-			return IncomeSourceService.BuildDogWalkingHero(zoneModel, floor)
-		end,
-		onPurchase = function(_owner, zoneFloor)
-			IncomeSourceService.ActivateDogWalking(zoneFloor)
-		end,
-	},
-	{
 		id = "freelance_gig_hub",
 		name = "Freelance Gig Hub",
 		price = Config.FreelanceGigHub.unlockCost,

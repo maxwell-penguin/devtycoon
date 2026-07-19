@@ -11,7 +11,9 @@ local InsertService = game:GetService("InsertService")
 local Config = require(ReplicatedStorage.Shared.Config.PlanetHustleConfig)
 local Theme = require(ReplicatedStorage.Shared.Config.Theme)
 local EconomyService = require(script.Parent.EconomyService)
+local PurchaseEffects = require(script.Parent.PurchaseEffects)
 local FloatingText = require(ReplicatedStorage.Shared.Modules.FloatingText)
+local NumberFormatter = require(ReplicatedStorage.Shared.Modules.NumberFormatter)
 
 local DOOR_DASH_HOUSE_COUNT = 4
 local DOOR_DASH_HOUSE_SPACING = 20
@@ -90,14 +92,21 @@ local doorDashCooldowns: { [Player]: { [BasePart]: number } } = {}
 local rideshareCooldowns: { [Player]: { [BasePart]: number } } = {}
 local dogWalkingCooldowns: { [Player]: { [BasePart]: number } } = {}
 
--- Per-player DoorDash plot state (Phase 2-4 upgrade/manager/scale systems
--- read/write this to know which houses belong to which player).
+-- Per-player neighborhood plot state (upgrade/manager/scale systems read/
+-- write this to know which houses/stations belong to which player).
 type DoorDashPlot = {
 	folder: Folder,
 	origin: Vector3,
 	houses: { BasePart },
 }
 local doorDashPlots: { [Player]: DoorDashPlot } = {}
+
+type DogWalkingPlot = {
+	folder: Folder,
+	origin: Vector3,
+	hero: Model,
+}
+local dogWalkingPlots: { [Player]: DogWalkingPlot } = {}
 
 -- freelanceActive[player] = true while the passive tick loop should keep firing
 local freelanceActive: { [Player]: boolean } = {}
@@ -646,9 +655,7 @@ end
 -- Fire hydrant, dog bowl, tennis balls, "BEWARE OF DOG (he's friendly)"
 -- sign, a chewed shoe, a poop-bag dispenser, and paw-print ground decals —
 -- the suburban dog-walking details from the visual spec.
-local function buildDogWalkingDetails(zoneModel: Model, floor: BasePart)
-	local base = floor.Position + Vector3.new(0, floor.Size.Y / 2, 0)
-
+local function buildDogWalkingDetails(zoneModel: Model, base: Vector3)
 	local hydrantBody = Instance.new("Part")
 	hydrantBody.Name = "HydrantBody"
 	hydrantBody.Anchored = true
@@ -786,13 +793,13 @@ end
 -- The Dog Walking "hero": a leash post with a tangle of 3 dogs on Beam
 -- leashes (CurveSize gives them a bit of sag/slack). LeashPost is the
 -- interactive part — a fixed, always-findable anchor, unlike picking one
--- of the 3 dogs arbitrarily.
-function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, floor: BasePart): Model | BasePart
+-- of the 3 dogs arbitrarily. `base` is a ground-level world position (was
+-- previously derived from a Zone floor part; Dog Walking is now the
+-- always-free per-plot starter, so it's just the plot-relative spot).
+function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, base: Vector3): Model
 	local hero = Instance.new("Model")
 	hero.Name = "Hero"
 	hero.Parent = zoneModel
-
-	local base = floor.Position + Vector3.new(0, floor.Size.Y / 2, 0)
 
 	local post = Instance.new("Part")
 	post.Name = "LeashPost"
@@ -850,7 +857,7 @@ function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, floor: BasePa
 		warn("[IncomeSourceService] Failed to load any Dog Walking asset copies, tangle will be post-only")
 	end
 
-	buildDogWalkingDetails(zoneModel, floor)
+	buildDogWalkingDetails(zoneModel, base)
 
 	return hero
 end
@@ -1119,11 +1126,10 @@ function IncomeSourceService.BuildFreelanceHero(zoneModel: Model, floor: BasePar
 	return hero
 end
 
--- Builds one player's private DoorDash neighborhood inside their own plot
--- folder (see PlotService). Same house/moped/detail dressing as before,
--- just positioned relative to the plot's origin instead of world origin so
--- every player gets their own copy.
-function IncomeSourceService.SetupPlayerDoorDash(player: Player, folder: Folder, origin: Vector3)
+-- Actually builds the houses/moped once DoorDash is unlocked (fresh
+-- purchase or already-owned rejoin) - same layout as before the role swap,
+-- just gated behind a one-time cash unlock instead of being free from spawn.
+local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origin: Vector3)
 	local startX = -((DOOR_DASH_HOUSE_COUNT - 1) * DOOR_DASH_HOUSE_SPACING) / 2
 	local houseParts = {}
 	for i = 1, DOOR_DASH_HOUSE_COUNT do
@@ -1134,7 +1140,7 @@ function IncomeSourceService.SetupPlayerDoorDash(player: Player, folder: Folder,
 		house.Position = origin + Vector3.new(startX + (i - 1) * DOOR_DASH_HOUSE_SPACING, 4, -30)
 		house.Color = DOOR_DASH_HOUSE_COLORS[((i - 1) % #DOOR_DASH_HOUSE_COLORS) + 1]
 		house.Material = Enum.Material.Wood
-		house.Parent = folder
+		house.Parent = areaModel
 
 		local prompt = Instance.new("ProximityPrompt")
 		prompt.ActionText = "Deliver"
@@ -1151,15 +1157,132 @@ function IncomeSourceService.SetupPlayerDoorDash(player: Player, folder: Folder,
 			IncomeSourceService.HandleDoorDashDelivery(player, house)
 		end)
 
-		buildHouseDetails(house, folder)
+		buildHouseDetails(house, areaModel)
 		table.insert(houseParts, house)
 	end
 
-	buildDroppedCup(houseParts[2], folder)
-	buildStringLights(folder, houseParts)
-	buildMopedHero(folder, origin + Vector3.new(0, 0, -22))
+	buildDroppedCup(houseParts[2], areaModel)
+	buildStringLights(areaModel, houseParts)
+	buildMopedHero(areaModel, origin + Vector3.new(0, 0, -22))
 
-	doorDashPlots[player] = { folder = folder, origin = origin, houses = houseParts }
+	doorDashPlots[player] = { folder = areaModel.Parent :: Folder, origin = origin, houses = houseParts }
+end
+
+-- DoorDash is now a cash-gated unlock inside the shared per-plot
+-- neighborhood (swapped roles with Dog Walking) rather than the always-free
+-- starter. Mirrors ZoneService's locked-floor + price tag + hold-to-confirm
+-- prompt pattern, scoped to one player's own plot instead of a shared world
+-- zone, and routes through the same PurchaseEffects money-shot on unlock.
+function IncomeSourceService.SetupPlayerDoorDash(player: Player, folder: Folder, origin: Vector3)
+	local areaModel = Instance.new("Model")
+	areaModel.Name = "DoorDashArea"
+	areaModel.Parent = folder
+
+	if EconomyService.IsZoneOwned(player, "doordash") then
+		buildDoorDashNeighborhood(player, areaModel, origin)
+		return
+	end
+
+	local unlockFloor = Instance.new("Part")
+	unlockFloor.Name = "Floor"
+	unlockFloor.Anchored = true
+	unlockFloor.CanCollide = false
+	unlockFloor.Size = Vector3.new(10, 1, 10)
+	unlockFloor.Position = origin + Vector3.new(0, 0.5, -18)
+	unlockFloor.Color = Theme.Locked
+	unlockFloor.Material = Enum.Material.Neon
+	unlockFloor.Transparency = 0.5
+	unlockFloor.Parent = areaModel
+
+	local priceGui = Instance.new("BillboardGui")
+	priceGui.Name = "PriceTag"
+	priceGui.Adornee = unlockFloor
+	priceGui.Size = UDim2.new(0, 220, 0, 72)
+	priceGui.StudsOffset = Vector3.new(0, 5, 0)
+	priceGui.AlwaysOnTop = true
+	priceGui.MaxDistance = 100
+	priceGui.Parent = unlockFloor
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "Name"
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Position = UDim2.fromScale(0, 0)
+	nameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextScaled = true
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	nameLabel.TextStrokeTransparency = 0.3
+	nameLabel.Text = "DoorDash Runs"
+	nameLabel.Parent = priceGui
+
+	local priceLabel = Instance.new("TextLabel")
+	priceLabel.Name = "Price"
+	priceLabel.BackgroundTransparency = 1
+	priceLabel.Position = UDim2.fromScale(0, 0.5)
+	priceLabel.Size = UDim2.new(1, 0, 0.5, 0)
+	priceLabel.Font = Enum.Font.GothamBold
+	priceLabel.TextScaled = true
+	priceLabel.TextColor3 = Theme.Gold
+	priceLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	priceLabel.TextStrokeTransparency = 0.3
+	priceLabel.Text = "$" .. NumberFormatter.Format(Config.DoorDash.unlockCost)
+	priceLabel.Parent = priceGui
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Unlock"
+	prompt.ObjectText = "DoorDash Runs ($" .. NumberFormatter.Format(Config.DoorDash.unlockCost) .. ")"
+	prompt.HoldDuration = 0.5
+	prompt.MaxActivationDistance = 14
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.Parent = unlockFloor
+
+	prompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
+		IncomeSourceService.AttemptDoorDashUnlock(player, areaModel, unlockFloor, priceGui, prompt, origin)
+	end)
+end
+
+-- Standalone (not just a Triggered closure) so it's directly callable, same
+-- as ZoneService.AttemptPurchase / HandleDoorDashDelivery.
+function IncomeSourceService.AttemptDoorDashUnlock(
+	player: Player,
+	areaModel: Model,
+	unlockFloor: BasePart,
+	priceGui: BillboardGui,
+	prompt: ProximityPrompt,
+	origin: Vector3
+): boolean
+	if EconomyService.IsZoneOwned(player, "doordash") then
+		return false
+	end
+	if not EconomyService.CanAfford(player, Config.DoorDash.unlockCost) then
+		FloatingText.Show(unlockFloor, "Need $" .. NumberFormatter.Format(Config.DoorDash.unlockCost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, Config.DoorDash.unlockCost) then
+		return false
+	end
+	EconomyService.MarkZoneOwned(player, "doordash")
+
+	priceGui:Destroy()
+	prompt.Enabled = false
+	buildDoorDashNeighborhood(player, areaModel, origin)
+
+	local moped = areaModel:FindFirstChild("MopedHero")
+	PurchaseEffects.ApplyOwnedVisuals({
+		zoneModel = areaModel,
+		floor = unlockFloor,
+		hero = (moped :: Model) or unlockFloor,
+		ownedColor = Theme.CashPositive,
+		animate = true,
+		buyer = player,
+		resultText = "DOORDASH UNLOCKED!",
+		resultColor = Theme.CashPositive,
+	})
+	return true
 end
 
 function IncomeSourceService.CleanupPlayerDoorDash(player: Player)
@@ -1170,7 +1293,7 @@ end
 function IncomeSourceService.Init()
 	Players.PlayerRemoving:Connect(function(player)
 		rideshareCooldowns[player] = nil
-		dogWalkingCooldowns[player] = nil
+		IncomeSourceService.CleanupPlayerDogWalking(player)
 		IncomeSourceService.DeactivateFreelanceHub(player)
 	end)
 end
@@ -1253,20 +1376,13 @@ function IncomeSourceService.ActivateRideshare(zoneFloor: BasePart)
 end
 
 --------------------------------------------------------------------------------
--- DOG WALKING
+-- DOG WALKING (always-free per-plot starter — swapped roles with DoorDash)
 --------------------------------------------------------------------------------
 
 -- LeashPost (built by BuildDogWalkingHero) is the interactive part; this
--- just attaches the prompt to it rather than spawning a separate block.
-function IncomeSourceService.ActivateDogWalking(zoneFloor: BasePart)
-	local zoneModel = zoneFloor.Parent
-	if not zoneModel then
-		return
-	end
-	local hero = zoneModel:FindFirstChild("Hero")
-	if not hero then
-		return
-	end
+-- just attaches the prompt to it. Owner-gated like DoorDash's houses since
+-- this now lives in the player's own plot, not a shared world zone.
+function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model)
 	local post = hero:FindFirstChild("LeashPost") :: BasePart?
 	if not post or post:FindFirstChildOfClass("ProximityPrompt") then
 		return
@@ -1280,12 +1396,29 @@ function IncomeSourceService.ActivateDogWalking(zoneFloor: BasePart)
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
 	prompt.Parent = post
 
-	prompt.Triggered:Connect(function(player)
+	prompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
 		if not checkCooldown(dogWalkingCooldowns, player, post, Config.DogWalking.cooldown) then
 			return
 		end
 		payReward(player, post, Config.DogWalking.rewardPerLoop)
 	end)
+end
+
+-- Builds the always-free Dog Walking station in a player's shared
+-- neighborhood plot — no purchase, available the moment the plot exists.
+function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folder, origin: Vector3)
+	local base = origin + Vector3.new(0, 0, 15)
+	local hero = IncomeSourceService.BuildDogWalkingHero(folder, base)
+	dogWalkingPlots[player] = { folder = folder, origin = origin, hero = hero }
+	IncomeSourceService.ActivateDogWalking(player, hero)
+end
+
+function IncomeSourceService.CleanupPlayerDogWalking(player: Player)
+	dogWalkingCooldowns[player] = nil
+	dogWalkingPlots[player] = nil
 end
 
 --------------------------------------------------------------------------------
