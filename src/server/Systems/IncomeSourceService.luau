@@ -90,6 +90,15 @@ local doorDashCooldowns: { [Player]: { [BasePart]: number } } = {}
 local rideshareCooldowns: { [Player]: { [BasePart]: number } } = {}
 local dogWalkingCooldowns: { [Player]: { [BasePart]: number } } = {}
 
+-- Per-player DoorDash plot state (Phase 2-4 upgrade/manager/scale systems
+-- read/write this to know which houses belong to which player).
+type DoorDashPlot = {
+	folder: Folder,
+	origin: Vector3,
+	houses: { BasePart },
+}
+local doorDashPlots: { [Player]: DoorDashPlot } = {}
+
 -- freelanceActive[player] = true while the passive tick loop should keep firing
 local freelanceActive: { [Player]: boolean } = {}
 
@@ -1110,15 +1119,11 @@ function IncomeSourceService.BuildFreelanceHero(zoneModel: Model, floor: BasePar
 	return hero
 end
 
-local function spawnDoorDashHouses(): Folder
-	local existing = workspace:FindFirstChild("DoorDashHouses")
-	if existing then
-		existing:Destroy()
-	end
-	local folder = Instance.new("Folder")
-	folder.Name = "DoorDashHouses"
-	folder.Parent = workspace
-
+-- Builds one player's private DoorDash neighborhood inside their own plot
+-- folder (see PlotService). Same house/moped/detail dressing as before,
+-- just positioned relative to the plot's origin instead of world origin so
+-- every player gets their own copy.
+function IncomeSourceService.SetupPlayerDoorDash(player: Player, folder: Folder, origin: Vector3)
 	local startX = -((DOOR_DASH_HOUSE_COUNT - 1) * DOOR_DASH_HOUSE_SPACING) / 2
 	local houseParts = {}
 	for i = 1, DOOR_DASH_HOUSE_COUNT do
@@ -1126,7 +1131,7 @@ local function spawnDoorDashHouses(): Folder
 		house.Name = "DoorDashHouse_" .. i
 		house.Size = Vector3.new(8, 8, 8)
 		house.Anchored = true
-		house.Position = Vector3.new(startX + (i - 1) * DOOR_DASH_HOUSE_SPACING, 4, -30)
+		house.Position = origin + Vector3.new(startX + (i - 1) * DOOR_DASH_HOUSE_SPACING, 4, -30)
 		house.Color = DOOR_DASH_HOUSE_COLORS[((i - 1) % #DOOR_DASH_HOUSE_COLORS) + 1]
 		house.Material = Enum.Material.Wood
 		house.Parent = folder
@@ -1139,7 +1144,10 @@ local function spawnDoorDashHouses(): Folder
 		prompt.KeyboardKeyCode = Enum.KeyCode.E
 		prompt.Parent = house
 
-		prompt.Triggered:Connect(function(player)
+		prompt.Triggered:Connect(function(triggeredBy)
+			if triggeredBy ~= player then
+				return
+			end
 			IncomeSourceService.HandleDoorDashDelivery(player, house)
 		end)
 
@@ -1149,15 +1157,18 @@ local function spawnDoorDashHouses(): Folder
 
 	buildDroppedCup(houseParts[2], folder)
 	buildStringLights(folder, houseParts)
-	buildMopedHero(folder, Vector3.new(0, 0, -22))
+	buildMopedHero(folder, origin + Vector3.new(0, 0, -22))
 
-	return folder
+	doorDashPlots[player] = { folder = folder, origin = origin, houses = houseParts }
+end
+
+function IncomeSourceService.CleanupPlayerDoorDash(player: Player)
+	doorDashCooldowns[player] = nil
+	doorDashPlots[player] = nil
 end
 
 function IncomeSourceService.Init()
-	spawnDoorDashHouses()
 	Players.PlayerRemoving:Connect(function(player)
-		doorDashCooldowns[player] = nil
 		rideshareCooldowns[player] = nil
 		dogWalkingCooldowns[player] = nil
 		IncomeSourceService.DeactivateFreelanceHub(player)
