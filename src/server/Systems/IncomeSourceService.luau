@@ -112,6 +112,9 @@ local dogWalkingPlots: { [Player]: DogWalkingPlot } = {}
 -- freelanceActive[player] = true while the passive tick loop should keep firing
 local freelanceActive: { [Player]: boolean } = {}
 
+-- dogWalkingManagerActive[player] = true while the auto-collect loop should keep firing
+local dogWalkingManagerActive: { [Player]: boolean } = {}
+
 local function getStatsFolder(player: Player): Folder?
 	return player:FindFirstChild("PlanetHustleStats")
 end
@@ -1577,7 +1580,132 @@ function IncomeSourceService.AttemptDogWalkingSpeedUpgrade(player: Player, board
 	return true
 end
 
--- Builds the always-free Dog Walking station + its Value/Speed upgrade
+-- Tweens a Model back and forth between two CFrames forever via a
+-- NumberValue-lerp-driven PivotTo — same technique PurchaseEffects.riseHero
+-- uses for Model heroes (Model has no tweenable CFrame property), just with
+-- infinite repeat+reverse instead of a one-shot rise. Cheap cosmetic patrol,
+-- no pathfinding.
+local function loopModelBetweenPoints(model: Model, cframeA: CFrame, cframeB: CFrame, duration: number)
+	model:PivotTo(cframeA)
+	local alpha = Instance.new("NumberValue")
+	alpha.Value = 0
+	alpha.Parent = model
+	alpha:GetPropertyChangedSignal("Value"):Connect(function()
+		if model.Parent then
+			model:PivotTo(cframeA:Lerp(cframeB, alpha.Value))
+		end
+	end)
+	TweenService:Create(alpha, TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { Value = 1 }):Play()
+end
+
+-- The "Dog Walker" hired NPC: a primitive blocky figure with a 4th leashed
+-- dog, pacing a short loop near the station so automation feels alive
+-- without any pathfinding.
+local function buildDogWalkerNpc(folder: Instance, base: Vector3): Model
+	local npc = Instance.new("Model")
+	npc.Name = "DogWalkerNpc"
+	npc.Parent = folder
+
+	local torso = Instance.new("Part")
+	torso.Name = "Torso"
+	torso.Anchored = true
+	torso.CanCollide = false
+	torso.Material = Enum.Material.SmoothPlastic
+	torso.Color = Theme.Secondary
+	torso.Size = Vector3.new(1.4, 2, 0.8)
+	torso.CFrame = CFrame.new(base + Vector3.new(-4, 3, -2))
+	torso.Parent = npc
+	npc.PrimaryPart = torso
+
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Shape = Enum.PartType.Ball
+	head.Anchored = true
+	head.CanCollide = false
+	head.Material = Enum.Material.SmoothPlastic
+	head.Color = Color3.fromRGB(255, 213, 170)
+	head.Size = Vector3.new(1, 1, 1)
+	head.CFrame = torso.CFrame * CFrame.new(0, 1.5, 0)
+	head.Parent = npc
+
+	for _, side in ipairs({ -1, 1 }) do
+		local leg = Instance.new("Part")
+		leg.Name = "Leg"
+		leg.Anchored = true
+		leg.CanCollide = false
+		leg.Material = Enum.Material.SmoothPlastic
+		leg.Color = Color3.fromRGB(40, 40, 45)
+		leg.Size = Vector3.new(0.5, 1.6, 0.6)
+		leg.CFrame = torso.CFrame * CFrame.new(side * 0.35, -1.8, 0)
+		leg.Parent = npc
+	end
+
+	local dog = loadDogModel()
+	if dog then
+		dog.Name = "WalkerDog"
+		dog.Parent = npc
+		scaleAndPositionDog(dog, base + Vector3.new(-5.5, 0, -2), math.rad(90))
+	end
+
+	local pointA = torso.CFrame
+	local pointB = torso.CFrame * CFrame.new(9, 0, 0)
+	loopModelBetweenPoints(npc, pointA, pointB, 4)
+
+	return npc
+end
+
+function IncomeSourceService.AttemptDogWalkingManagerHire(
+	player: Player,
+	folder: Instance,
+	base: Vector3,
+	post: BasePart,
+	board: BasePart,
+	statusLabel: TextLabel,
+	prompt: ProximityPrompt
+): boolean
+	local state = EconomyService.GetDogWalkingState(player)
+	if state.hasManager then
+		return false
+	end
+	if not EconomyService.CanAfford(player, Config.DogWalking.managerCost) then
+		FloatingText.Show(board, "Need $" .. NumberFormatter.Format(Config.DogWalking.managerCost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, Config.DogWalking.managerCost) then
+		return false
+	end
+	EconomyService.UpdateDogWalking(player, { hasManager = true })
+
+	statusLabel.Text = "HIRED"
+	prompt.Enabled = false
+	FloatingText.Show(board, "Dog Walker Hired!", Theme.CashPositive)
+
+	buildDogWalkerNpc(folder, base)
+	IncomeSourceService.StartDogWalkingManagerLoop(player, post)
+	return true
+end
+
+-- Auto-collect loop: fires HandleDogWalkingDelivery on the Speed track's
+-- current cooldown. Manual E-presses route through the same function and
+-- share the same cooldown table (checkCooldown), so whichever fires first -
+-- manual or auto - simply resets that station's own timer; no double-pay.
+function IncomeSourceService.StartDogWalkingManagerLoop(player: Player, post: BasePart)
+	if dogWalkingManagerActive[player] then
+		return
+	end
+	dogWalkingManagerActive[player] = true
+	task.spawn(function()
+		while dogWalkingManagerActive[player] and player.Parent do
+			task.wait(getDogWalkingCooldown(player))
+			if not (dogWalkingManagerActive[player] and player.Parent) then
+				break
+			end
+			IncomeSourceService.HandleDogWalkingDelivery(player, post)
+		end
+	end)
+end
+
+-- Builds the always-free Dog Walking station + its Value/Speed/Manager
 -- kiosks in a player's shared neighborhood plot — no purchase to unlock the
 -- station itself, available the moment the plot exists.
 function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folder, origin: Vector3)
@@ -1586,7 +1714,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 	local prompt = IncomeSourceService.ActivateDogWalking(player, hero)
 	dogWalkingPlots[player] = { folder = folder, origin = origin, hero = hero, prompt = prompt }
 
-	local valueBoard, valueStatus, valuePrompt = buildDogWalkingTierKiosk(folder, base + Vector3.new(-6, 0, 3), "Value", Theme.Brand)
+	local valueBoard, valueStatus, valuePrompt = buildDogWalkingTierKiosk(folder, base + Vector3.new(-8, 0, 5), "Value", Theme.Brand)
 	refreshValueKioskDisplay(player, valueStatus, valuePrompt)
 	valuePrompt.Triggered:Connect(function(triggeredBy)
 		if triggeredBy ~= player then
@@ -1595,7 +1723,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		IncomeSourceService.AttemptDogWalkingValueUpgrade(player, valueBoard, valueStatus, valuePrompt)
 	end)
 
-	local speedBoard, speedStatus, speedPrompt = buildDogWalkingTierKiosk(folder, base + Vector3.new(6, 0, 3), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPrompt = buildDogWalkingTierKiosk(folder, base + Vector3.new(8, 0, 5), "Speed", Theme.Secondary)
 	refreshSpeedKioskDisplay(player, speedStatus, speedPrompt)
 	speedPrompt.Triggered:Connect(function(triggeredBy)
 		if triggeredBy ~= player then
@@ -1603,10 +1731,31 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		end
 		IncomeSourceService.AttemptDogWalkingSpeedUpgrade(player, speedBoard, speedStatus, speedPrompt)
 	end)
+
+	local managerBoard, managerStatus, managerPrompt = buildDogWalkingTierKiosk(folder, base + Vector3.new(0, 0, 5), "Manager", Theme.Gold)
+	local dogWalkingState = EconomyService.GetDogWalkingState(player)
+	local post = hero:FindFirstChild("LeashPost") :: BasePart
+	if dogWalkingState.hasManager then
+		managerStatus.Text = "HIRED"
+		managerPrompt.Enabled = false
+		buildDogWalkerNpc(folder, base)
+		IncomeSourceService.StartDogWalkingManagerLoop(player, post)
+	else
+		managerStatus.Text = "Hire a Dog Walker\n$" .. NumberFormatter.Format(Config.DogWalking.managerCost)
+		managerPrompt.ActionText = "Hire"
+		managerPrompt.ObjectText = "Hire a Dog Walker ($" .. NumberFormatter.Format(Config.DogWalking.managerCost) .. ")"
+	end
+	managerPrompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
+		IncomeSourceService.AttemptDogWalkingManagerHire(player, folder, base, post, managerBoard, managerStatus, managerPrompt)
+	end)
 end
 
 function IncomeSourceService.CleanupPlayerDogWalking(player: Player)
 	dogWalkingCooldowns[player] = nil
+	dogWalkingManagerActive[player] = nil
 	dogWalkingPlots[player] = nil
 end
 
