@@ -6,11 +6,13 @@ local EconomyService = require(Systems.EconomyService)
 local ZoneService = require(Systems.ZoneService)
 local IncomeSourceService = require(Systems.IncomeSourceService)
 local LotteryService = require(Systems.LotteryService)
+local PurchaseEffects = require(Systems.PurchaseEffects)
 
 local Remotes = Instance.new("Folder")
 Remotes.Name = "Remotes"
 Remotes.Parent = ReplicatedStorage
 
+PurchaseEffects.Init()
 EconomyService.Init()
 ZoneService.Init()
 IncomeSourceService.Init()

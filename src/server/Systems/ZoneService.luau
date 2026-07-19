@@ -1,18 +1,22 @@
 -- Purchasable zones: locked floor + name/price BillboardGui + ProximityPrompt
 -- (HoldDuration 0.5 = confirm-by-hold, native equivalent of a Y/N prompt).
--- On buy: EconomyService debit + MarkZoneOwned + build animation +
--- zone.onPurchase callback for hustle-specific activation.
+-- On buy: EconomyService debit + MarkZoneOwned + PurchaseEffects money-shot
+-- + zone.onPurchase callback for hustle-specific activation.
 --
--- Zones registered here: Rideshare, Dog Walking, Freelance Gig Hub (Step 6),
--- Lottery Ticket Booth (Step 7). DoorDash isn't a zone (always unlocked) —
--- IncomeSourceService spawns those houses at server init.
+-- Each zone supplies buildHero(zoneModel, floor) which constructs its final-
+-- state hero prop (and any per-zone decorative details) the first time the
+-- zone is owned; PurchaseEffects then either animates the reveal (fresh
+-- purchase) or shows it instantly (rejoin sync). Visual pass replaces the
+-- generic placeholder hero with a real prop per zone, one at a time.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage.Shared.Config.PlanetHustleConfig)
+local Theme = require(ReplicatedStorage.Shared.Config.Theme)
 local EconomyService = require(script.Parent.EconomyService)
 local IncomeSourceService = require(script.Parent.IncomeSourceService)
 local LotteryService = require(script.Parent.LotteryService)
+local PurchaseEffects = require(script.Parent.PurchaseEffects)
+local FloatingText = require(ReplicatedStorage.Shared.Modules.FloatingText)
 local NumberFormatter = require(ReplicatedStorage.Shared.Modules.NumberFormatter)
 
 local ZoneService = {}
@@ -23,10 +27,26 @@ type ZoneDef = {
 	price: number,
 	position: Vector3,
 	size: Vector3,
-	lockedColor: Color3,
 	ownedColor: Color3,
+	buildHero: (zoneModel: Model, floor: BasePart) -> BasePart,
 	onPurchase: ((owner: Player, zoneFloor: BasePart) -> ())?,
 }
+
+-- Generic placeholder hero: a block sized to the zone footprint. Every zone
+-- currently uses this; the zone-by-zone visual pass swaps each one out for
+-- a real hero prop (moped, car, booth marquee, dog tangle, tent).
+local function buildPlaceholderHero(zoneModel: Model, floor: BasePart, ownedColor: Color3, footprint: Vector3): BasePart
+	local hero = Instance.new("Part")
+	hero.Name = "Hero"
+	hero.Anchored = true
+	hero.CanCollide = true
+	hero.Material = Enum.Material.Neon
+	hero.Color = ownedColor
+	hero.Size = Vector3.new(footprint.X * 0.5, 8, footprint.Z * 0.5)
+	hero.Position = floor.Position + Vector3.new(0, 4.5, 0)
+	hero.Parent = zoneModel
+	return hero
+end
 
 local ZONES: { ZoneDef } = {
 	{
@@ -35,8 +55,10 @@ local ZONES: { ZoneDef } = {
 		price = Config.Rideshare.unlockCost,
 		position = Vector3.new(0, 0.5, 50),
 		size = Vector3.new(12, 1, 12),
-		lockedColor = Color3.fromRGB(90, 50, 50),
 		ownedColor = Color3.fromRGB(220, 90, 90),
+		buildHero = function(zoneModel, floor)
+			return buildPlaceholderHero(zoneModel, floor, Color3.fromRGB(220, 90, 90), Vector3.new(12, 1, 12))
+		end,
 		onPurchase = function(_owner, zoneFloor)
 			IncomeSourceService.ActivateRideshare(zoneFloor)
 		end,
@@ -47,8 +69,10 @@ local ZONES: { ZoneDef } = {
 		price = Config.Lottery.unlockCost,
 		position = Vector3.new(-50, 0.5, 0),
 		size = Vector3.new(12, 1, 12),
-		lockedColor = Color3.fromRGB(70, 40, 90),
-		ownedColor = Color3.fromRGB(180, 90, 220),
+		ownedColor = Theme.Secondary,
+		buildHero = function(zoneModel, floor)
+			return buildPlaceholderHero(zoneModel, floor, Theme.Secondary, Vector3.new(12, 1, 12))
+		end,
 		onPurchase = function(_owner, zoneFloor)
 			LotteryService.ActivateBooth(zoneFloor)
 		end,
@@ -59,8 +83,10 @@ local ZONES: { ZoneDef } = {
 		price = Config.DogWalking.unlockCost,
 		position = Vector3.new(50, 0.5, 50),
 		size = Vector3.new(12, 1, 12),
-		lockedColor = Color3.fromRGB(90, 70, 40),
 		ownedColor = Color3.fromRGB(200, 160, 100),
+		buildHero = function(zoneModel, floor)
+			return buildPlaceholderHero(zoneModel, floor, Color3.fromRGB(200, 160, 100), Vector3.new(12, 1, 12))
+		end,
 		onPurchase = function(_owner, zoneFloor)
 			IncomeSourceService.ActivateDogWalking(zoneFloor)
 		end,
@@ -71,8 +97,10 @@ local ZONES: { ZoneDef } = {
 		price = Config.FreelanceGigHub.unlockCost,
 		position = Vector3.new(-50, 0.5, 50),
 		size = Vector3.new(12, 1, 12),
-		lockedColor = Color3.fromRGB(50, 70, 90),
 		ownedColor = Color3.fromRGB(100, 180, 240),
+		buildHero = function(zoneModel, floor)
+			return buildPlaceholderHero(zoneModel, floor, Color3.fromRGB(100, 180, 240), Vector3.new(12, 1, 12))
+		end,
 		onPurchase = function(owner, _zoneFloor)
 			IncomeSourceService.ActivateFreelanceHub(owner)
 		end,
@@ -86,36 +114,7 @@ end
 
 local zoneFloors: { [string]: BasePart } = {}
 
-local function showFloatingText(anchor: BasePart, text: string, color: Color3)
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "FloatingText"
-	gui.Adornee = anchor
-	gui.Size = UDim2.new(0, 160, 0, 56)
-	gui.StudsOffset = Vector3.new(0, 4, 0)
-	gui.AlwaysOnTop = true
-	gui.MaxDistance = 80
-	gui.Parent = anchor
-
-	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
-	label.Size = UDim2.fromScale(1, 1)
-	label.Font = Enum.Font.GothamBold
-	label.TextScaled = true
-	label.TextColor3 = color
-	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-	label.TextStrokeTransparency = 0.3
-	label.Text = text
-	label.Parent = gui
-
-	local info = TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	TweenService:Create(gui, info, { StudsOffset = Vector3.new(0, 9, 0) }):Play()
-	TweenService:Create(label, info, { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
-	task.delay(0.95, function()
-		gui:Destroy()
-	end)
-end
-
-local function applyOwnedVisuals(floor: BasePart, zone: ZoneDef, animate: boolean)
+local function applyOwnedVisuals(zoneModel: Model, floor: BasePart, zone: ZoneDef, animate: boolean, buyer: Player?)
 	local priceTag = floor:FindFirstChild("PriceTag")
 	if priceTag then
 		priceTag:Destroy()
@@ -125,34 +124,22 @@ local function applyOwnedVisuals(floor: BasePart, zone: ZoneDef, animate: boolea
 		prompt.Enabled = false
 	end
 
-	local existing = floor.Parent and floor.Parent:FindFirstChild("Building")
-	if existing then
+	if zoneModel:FindFirstChild("Hero") then
 		return
 	end
 
-	local building = Instance.new("Part")
-	building.Name = "Building"
-	building.Anchored = true
-	building.CanCollide = true
-	building.Material = Enum.Material.Neon
-	building.Color = zone.ownedColor
-	building.Position = floor.Position + Vector3.new(0, 4.5, 0)
-	building.Parent = floor.Parent
+	local hero = zone.buildHero(zoneModel, floor)
 
-	if animate then
-		building.Size = Vector3.new(0.2, 0.2, 0.2)
-		local target = Vector3.new(zone.size.X * 0.5, 8, zone.size.Z * 0.5)
-		local info = TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-		TweenService:Create(building, info, { Size = target }):Play()
-		TweenService:Create(floor, TweenInfo.new(0.3), {
-			Transparency = 0,
-			Color = zone.ownedColor,
-		}):Play()
-	else
-		building.Size = Vector3.new(zone.size.X * 0.5, 8, zone.size.Z * 0.5)
-		floor.Transparency = 0
-		floor.Color = zone.ownedColor
-	end
+	PurchaseEffects.ApplyOwnedVisuals({
+		zoneModel = zoneModel,
+		floor = floor,
+		hero = hero,
+		ownedColor = zone.ownedColor,
+		animate = animate,
+		buyer = buyer,
+		resultText = animate and "PURCHASED!" or nil,
+		resultColor = animate and Theme.CashPositive or nil,
+	})
 end
 
 local function spawnZone(zone: ZoneDef)
@@ -166,7 +153,7 @@ local function spawnZone(zone: ZoneDef)
 	floor.CanCollide = false
 	floor.Size = zone.size
 	floor.Position = zone.position
-	floor.Color = zone.lockedColor
+	floor.Color = Theme.Locked
 	floor.Material = Enum.Material.Neon
 	floor.Transparency = 0.5
 	floor.Parent = model
@@ -200,7 +187,7 @@ local function spawnZone(zone: ZoneDef)
 	priceLabel.Size = UDim2.new(1, 0, 0.5, 0)
 	priceLabel.Font = Enum.Font.GothamBold
 	priceLabel.TextScaled = true
-	priceLabel.TextColor3 = Color3.fromRGB(255, 220, 90)
+	priceLabel.TextColor3 = Theme.Gold
 	priceLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	priceLabel.TextStrokeTransparency = 0.3
 	priceLabel.Text = "$" .. NumberFormatter.Format(zone.price)
@@ -238,7 +225,7 @@ function ZoneService.SyncPlayerZones(player: Player)
 		if EconomyService.IsZoneOwned(player, zone.id) then
 			local floor = zoneFloors[zone.id]
 			if floor then
-				applyOwnedVisuals(floor, zone, false)
+				applyOwnedVisuals(floor.Parent :: Model, floor, zone, false, nil)
 				if zone.onPurchase then
 					zone.onPurchase(player, floor)
 				end
@@ -261,7 +248,7 @@ function ZoneService.AttemptPurchase(player: Player, zoneId: string): boolean
 	end
 
 	if not EconomyService.CanAfford(player, zone.price) then
-		showFloatingText(floor, "Need $" .. NumberFormatter.Format(zone.price) .. "!", Color3.fromRGB(255, 100, 100))
+		FloatingText.Show(floor, "Need $" .. NumberFormatter.Format(zone.price) .. "!", Theme.Warning)
 		return false
 	end
 
@@ -270,8 +257,7 @@ function ZoneService.AttemptPurchase(player: Player, zoneId: string): boolean
 	end
 	EconomyService.MarkZoneOwned(player, zoneId)
 
-	applyOwnedVisuals(floor, zone, true)
-	showFloatingText(floor, "PURCHASED!", Color3.fromRGB(85, 255, 127))
+	applyOwnedVisuals(floor.Parent :: Model, floor, zone, true, player)
 	if zone.onPurchase then
 		zone.onPurchase(player, floor)
 	end

@@ -3,15 +3,16 @@
 -- E, and watches the floating result text the server spawned. ZoneService
 -- calls ActivateBooth on Lottery zone purchase (and on rejoin for owners).
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage.Shared.Config.PlanetHustleConfig)
+local Theme = require(ReplicatedStorage.Shared.Config.Theme)
 local EconomyService = require(script.Parent.EconomyService)
+local FloatingText = require(ReplicatedStorage.Shared.Modules.FloatingText)
 local NumberFormatter = require(ReplicatedStorage.Shared.Modules.NumberFormatter)
 
 local LotteryService = {}
 
-local BOOTH_COLOR = Color3.fromRGB(200, 80, 220)
+local BOOTH_COLOR = Theme.Secondary
 local BOOTH_SIZE = Vector3.new(5, 6, 5)
 
 -- cooldowns[player][booth] = os.clock() expiry
@@ -54,46 +55,30 @@ local function showResultText(anchor: BasePart, outcomeName: string, payout: num
 	local net = payout - ticketPrice
 	local text: string
 	local color: Color3
+	local textScale = 1
 	if outcomeName == "jackpot" then
 		text = "JACKPOT! +$" .. NumberFormatter.WithCommas(net)
-		color = Color3.fromRGB(255, 220, 90)
+		color = Theme.Gold
+		textScale = 1.4
 	elseif outcomeName == "bigWin" then
 		text = "BIG WIN +$" .. NumberFormatter.WithCommas(net)
-		color = Color3.fromRGB(85, 255, 127)
+		color = Theme.CashPositive
+		textScale = 1.15
 	elseif outcomeName == "modestWin" then
 		text = "+$" .. NumberFormatter.WithCommas(net)
-		color = Color3.fromRGB(85, 255, 127)
+		color = Theme.CashPositive
 	else
 		text = "-$" .. NumberFormatter.WithCommas(-net)
-		color = Color3.fromRGB(255, 130, 130)
+		color = Theme.Warning
 	end
 
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "LotteryResult"
-	gui.Adornee = anchor
-	gui.Size = UDim2.new(0, 220, 0, 64)
-	gui.StudsOffset = Vector3.new(0, 5, 0)
-	gui.AlwaysOnTop = true
-	gui.MaxDistance = 100
-	gui.Parent = anchor
-
-	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
-	label.Size = UDim2.fromScale(1, 1)
-	label.Font = Enum.Font.GothamBold
-	label.TextScaled = true
-	label.TextColor3 = color
-	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-	label.TextStrokeTransparency = 0.3
-	label.Text = text
-	label.Parent = gui
-
-	local info = TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	TweenService:Create(gui, info, { StudsOffset = Vector3.new(0, 11, 0) }):Play()
-	TweenService:Create(label, info, { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
-	task.delay(1.05, function()
-		gui:Destroy()
-	end)
+	FloatingText.Show(anchor, text, color, {
+		size = UDim2.new(0, 220, 0, 64),
+		riseDistance = 6,
+		duration = 1.0,
+		maxDistance = 100,
+		textScale = textScale,
+	})
 end
 
 local function checkCooldown(player: Player, booth: BasePart): boolean
