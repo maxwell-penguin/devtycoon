@@ -32,22 +32,6 @@ type ZoneDef = {
 	onPurchase: ((owner: Player, zoneFloor: BasePart) -> ())?,
 }
 
--- Generic placeholder hero: a block sized to the zone footprint. Every zone
--- currently uses this; the zone-by-zone visual pass swaps each one out for
--- a real hero prop (moped, car, booth marquee, dog tangle, tent).
-local function buildPlaceholderHero(zoneModel: Model, floor: BasePart, ownedColor: Color3, footprint: Vector3): BasePart
-	local hero = Instance.new("Part")
-	hero.Name = "Hero"
-	hero.Anchored = true
-	hero.CanCollide = true
-	hero.Material = Enum.Material.Neon
-	hero.Color = ownedColor
-	hero.Size = Vector3.new(footprint.X * 0.5, 8, footprint.Z * 0.5)
-	hero.Position = floor.Position + Vector3.new(0, 4.5, 0)
-	hero.Parent = zoneModel
-	return hero
-end
-
 local ZONES: { ZoneDef } = {
 	{
 		id = "rideshare",
@@ -99,7 +83,7 @@ local ZONES: { ZoneDef } = {
 		size = Vector3.new(12, 1, 12),
 		ownedColor = Color3.fromRGB(100, 180, 240),
 		buildHero = function(zoneModel, floor)
-			return buildPlaceholderHero(zoneModel, floor, Color3.fromRGB(100, 180, 240), Vector3.new(12, 1, 12))
+			return IncomeSourceService.BuildFreelanceHero(zoneModel, floor)
 		end,
 		onPurchase = function(owner, _zoneFloor)
 			IncomeSourceService.ActivateFreelanceHub(owner)

@@ -62,6 +62,27 @@ local SHOE_COLOR = Color3.fromRGB(120, 80, 55)
 local PAW_PRINT_COLOR = Color3.fromRGB(60, 45, 40)
 local LEASH_POST_COLOR = Color3.fromRGB(140, 140, 145)
 
+-- All primitives — a pop-up tent + desk is squarely primitives territory
+-- per the visual spec, no Toolbox asset needed. Freelance has no
+-- interactive prompt at all (ActivateFreelanceHub is pure passive income,
+-- no "walk up and press E" loop), so this hero is purely decorative.
+local TENT_CANOPY_COLOR = Theme.Secondary
+local TENT_TRIM_COLOR = Color3.fromRGB(255, 255, 255)
+local TENT_POLE_COLOR = Color3.fromRGB(90, 90, 95)
+local DESK_COLOR = Color3.fromRGB(120, 90, 65)
+local LAPTOP_COLORS = {
+	Color3.fromRGB(220, 220, 225),
+	Color3.fromRGB(60, 60, 65),
+	Color3.fromRGB(200, 90, 120),
+}
+local WIFI_BAR_COLOR = Theme.AffordablePulse
+local BEAN_BAG_COLOR = Color3.fromRGB(200, 90, 60)
+local WHITEBOARD_COLOR = Color3.fromRGB(245, 245, 245)
+local MONSTERA_POT_COLOR = Color3.fromRGB(180, 100, 70)
+local MONSTERA_LEAF_COLOR = Color3.fromRGB(50, 130, 70)
+local COLD_BREW_COLOR = Color3.fromRGB(70, 45, 30)
+local CABLE_COLOR = Color3.fromRGB(30, 30, 30)
+
 local IncomeSourceService = {}
 
 -- cd[player][station] = os.clock() expiry
@@ -821,6 +842,270 @@ function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, floor: BasePa
 	end
 
 	buildDogWalkingDetails(zoneModel, floor)
+
+	return hero
+end
+
+-- Sticker-covered laptops, a cold-brew can, a bean bag, a "HUSTLE"
+-- whiteboard, tangled charging cables, a potted monstera, and a pinned
+-- "1★ client" complaint note — the co-working clutter from the visual
+-- spec. Deliberately the densest/most cluttered of the five zones so it
+-- reads as the most "established" — someone's clearly been working here.
+local function buildFreelanceDetails(zoneModel: Model, floor: BasePart, desk: BasePart)
+	local base = floor.Position + Vector3.new(0, floor.Size.Y / 2, 0)
+
+	for i, color in ipairs(LAPTOP_COLORS) do
+		local laptopBase = Instance.new("Part")
+		laptopBase.Name = "LaptopBase"
+		laptopBase.Anchored = true
+		laptopBase.CanCollide = false
+		laptopBase.Material = Enum.Material.SmoothPlastic
+		laptopBase.Color = color
+		laptopBase.Size = Vector3.new(1.2, 0.1, 0.8)
+		laptopBase.CFrame = desk.CFrame * CFrame.new(-1.2 + (i - 1) * 1.2, 0.35, 0)
+		laptopBase.Parent = zoneModel
+
+		local laptopScreen = Instance.new("Part")
+		laptopScreen.Name = "LaptopScreen"
+		laptopScreen.Anchored = true
+		laptopScreen.CanCollide = false
+		laptopScreen.Material = Enum.Material.SmoothPlastic
+		laptopScreen.Color = color
+		laptopScreen.Size = Vector3.new(1.2, 0.8, 0.06)
+		laptopScreen.CFrame = laptopBase.CFrame * CFrame.new(0, 0.4, -0.37) * CFrame.Angles(math.rad(-100), 0, 0)
+		laptopScreen.Parent = zoneModel
+
+		-- A small bright "sticker" square on the lid back
+		local sticker = Instance.new("Part")
+		sticker.Name = "LaptopSticker"
+		sticker.Anchored = true
+		sticker.CanCollide = false
+		sticker.Material = Enum.Material.SmoothPlastic
+		sticker.Color = LAPTOP_COLORS[((i) % #LAPTOP_COLORS) + 1]
+		sticker.Size = Vector3.new(0.3, 0.3, 0.02)
+		sticker.CFrame = laptopScreen.CFrame * CFrame.new(0.3, 0.15, -0.04)
+		sticker.Parent = zoneModel
+	end
+
+	-- WiFi signal bars, floating above the tent
+	local wifiBase = desk.Position + Vector3.new(0, 6, 0)
+	for i = 1, 4 do
+		local bar = Instance.new("Part")
+		bar.Name = "WifiBar"
+		bar.Anchored = true
+		bar.CanCollide = false
+		bar.Material = Enum.Material.Neon
+		bar.Color = WIFI_BAR_COLOR
+		local barHeight = 0.5 + i * 0.4
+		bar.Size = Vector3.new(0.5, barHeight, 0.5)
+		bar.CFrame = CFrame.new(wifiBase + Vector3.new(-1.2 + i * 0.8, barHeight / 2, 0))
+		bar.Parent = zoneModel
+		task.delay((i - 1) * 0.15, function()
+			if bar.Parent then
+				TweenService:Create(
+					bar,
+					TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+					{ Transparency = 0.55 }
+				):Play()
+			end
+		end)
+	end
+
+	-- Bean bag
+	local beanBag = Instance.new("Part")
+	beanBag.Name = "BeanBag"
+	beanBag.Shape = Enum.PartType.Ball
+	beanBag.Anchored = true
+	beanBag.CanCollide = true
+	beanBag.Material = Enum.Material.Fabric
+	beanBag.Color = BEAN_BAG_COLOR
+	beanBag.Size = Vector3.new(2.6, 1.6, 2.6)
+	beanBag.CFrame = CFrame.new(base + Vector3.new(4, 0.8, 3))
+	beanBag.Parent = zoneModel
+
+	-- "HUSTLE" whiteboard with a pinned 1-star complaint note
+	local whiteboardPost = Instance.new("Part")
+	whiteboardPost.Name = "WhiteboardPost"
+	whiteboardPost.Anchored = true
+	whiteboardPost.CanCollide = false
+	whiteboardPost.Material = Enum.Material.Metal
+	whiteboardPost.Color = TENT_POLE_COLOR
+	whiteboardPost.Size = Vector3.new(0.3, 4, 0.3)
+	whiteboardPost.CFrame = CFrame.new(base + Vector3.new(-4.5, 2, -3.5))
+	whiteboardPost.Parent = zoneModel
+
+	local whiteboard = Instance.new("Part")
+	whiteboard.Name = "Whiteboard"
+	whiteboard.Anchored = true
+	whiteboard.CanCollide = false
+	whiteboard.Material = Enum.Material.SmoothPlastic
+	whiteboard.Color = WHITEBOARD_COLOR
+	whiteboard.Size = Vector3.new(3, 2, 0.15)
+	whiteboard.CFrame = whiteboardPost.CFrame * CFrame.new(0, 1.8, 0)
+	whiteboard.Parent = zoneModel
+
+	local whiteboardGui = Instance.new("SurfaceGui")
+	whiteboardGui.Face = Enum.NormalId.Back
+	whiteboardGui.Parent = whiteboard
+	local whiteboardLabel = Instance.new("TextLabel")
+	whiteboardLabel.BackgroundTransparency = 1
+	whiteboardLabel.Size = UDim2.fromScale(1, 1)
+	whiteboardLabel.Font = Enum.Font.Bangers
+	whiteboardLabel.TextScaled = true
+	whiteboardLabel.TextColor3 = Color3.fromRGB(200, 60, 60)
+	whiteboardLabel.Text = "HUSTLE"
+	whiteboardLabel.Parent = whiteboardGui
+
+	local noteBoard = Instance.new("Part")
+	noteBoard.Name = "ComplaintNote"
+	noteBoard.Anchored = true
+	noteBoard.CanCollide = false
+	noteBoard.Material = Enum.Material.SmoothPlastic
+	noteBoard.Color = Color3.fromRGB(255, 240, 180)
+	noteBoard.Size = Vector3.new(0.9, 0.7, 0.05)
+	noteBoard.CFrame = whiteboard.CFrame * CFrame.new(1.6, 0.4, -0.11) * CFrame.Angles(0, 0, math.rad(-8))
+	noteBoard.Parent = zoneModel
+
+	local noteGui = Instance.new("SurfaceGui")
+	noteGui.Face = Enum.NormalId.Back
+	noteGui.Parent = noteBoard
+	local noteLabel = Instance.new("TextLabel")
+	noteLabel.BackgroundTransparency = 1
+	noteLabel.Size = UDim2.fromScale(1, 1)
+	noteLabel.Font = Enum.Font.Code
+	noteLabel.TextScaled = true
+	noteLabel.TextColor3 = Color3.fromRGB(40, 30, 10)
+	noteLabel.TextWrapped = true
+	noteLabel.Text = '1 star\n"never\nresponds"'
+	noteLabel.Parent = noteGui
+
+	-- Potted monstera (pot + a few fanned flat "leaves")
+	local pot = Instance.new("Part")
+	pot.Name = "MonsteraPot"
+	pot.Shape = Enum.PartType.Cylinder
+	pot.Anchored = true
+	pot.CanCollide = true
+	pot.Material = Enum.Material.SmoothPlastic
+	pot.Color = MONSTERA_POT_COLOR
+	pot.Size = Vector3.new(1.4, 1.2, 1.2)
+	pot.CFrame = CFrame.new(base + Vector3.new(4.5, 0.7, -3.5)) * CFrame.Angles(0, 0, math.rad(90))
+	pot.Parent = zoneModel
+
+	for i = 1, 4 do
+		local leaf = Instance.new("Part")
+		leaf.Name = "MonsteraLeaf"
+		leaf.Anchored = true
+		leaf.CanCollide = false
+		leaf.Material = Enum.Material.SmoothPlastic
+		leaf.Color = MONSTERA_LEAF_COLOR
+		leaf.Size = Vector3.new(0.1, 1.6, 0.9)
+		leaf.CFrame = pot.CFrame * CFrame.new(0, 1.1, 0) * CFrame.Angles(0, math.rad(i * 80), math.rad(15))
+		leaf.Parent = zoneModel
+	end
+
+	-- Cold-brew can
+	local can = Instance.new("Part")
+	can.Name = "ColdBrewCan"
+	can.Shape = Enum.PartType.Cylinder
+	can.Anchored = true
+	can.CanCollide = false
+	can.Material = Enum.Material.Metal
+	can.Color = COLD_BREW_COLOR
+	can.Size = Vector3.new(0.7, 0.5, 0.5)
+	can.CFrame = desk.CFrame * CFrame.new(1.6, 0.35, 0.5) * CFrame.Angles(0, 0, math.rad(90))
+	can.Parent = zoneModel
+
+	-- Tangled charging cables on the ground near the desk
+	for i = 1, 3 do
+		local cable = Instance.new("Part")
+		cable.Name = "ChargingCable"
+		cable.Shape = Enum.PartType.Cylinder
+		cable.Anchored = true
+		cable.CanCollide = false
+		cable.Material = Enum.Material.SmoothPlastic
+		cable.Color = CABLE_COLOR
+		cable.Size = Vector3.new(0.08, 1.4, 0.08)
+		cable.CFrame = CFrame.new(base + Vector3.new(-1.5 + i * 0.5, 0.05, 1.5))
+			* CFrame.Angles(math.rad(90), math.rad(i * 40), 0)
+		cable.Parent = zoneModel
+	end
+end
+
+-- The Freelance Gig Hub "hero": a pop-up co-working tent (4 poles + 2 roof
+-- wedges + a trim stripe) over a laptop-covered desk, with glowing WiFi
+-- bars overhead. No interactive prompt — ActivateFreelanceHub just flips
+-- on passive income, there's no "walk up and press E" loop here.
+function IncomeSourceService.BuildFreelanceHero(zoneModel: Model, floor: BasePart): Model | BasePart
+	local hero = Instance.new("Model")
+	hero.Name = "Hero"
+	hero.Parent = zoneModel
+
+	local base = floor.Position + Vector3.new(0, floor.Size.Y / 2, 0)
+	local tentHeight = 5
+
+	for _, corner in ipairs({ Vector3.new(-3, 0, -3), Vector3.new(3, 0, -3), Vector3.new(-3, 0, 3), Vector3.new(3, 0, 3) }) do
+		local pole = Instance.new("Part")
+		pole.Name = "TentPole"
+		pole.Anchored = true
+		pole.CanCollide = true
+		pole.Material = Enum.Material.Metal
+		pole.Color = TENT_POLE_COLOR
+		pole.Size = Vector3.new(0.3, tentHeight, 0.3)
+		pole.CFrame = CFrame.new(base + corner + Vector3.new(0, tentHeight / 2, 0))
+		pole.Parent = hero
+	end
+
+	local roofA = Instance.new("WedgePart")
+	roofA.Name = "RoofA"
+	roofA.Anchored = true
+	roofA.CanCollide = false
+	roofA.Material = Enum.Material.Fabric
+	roofA.Color = TENT_CANOPY_COLOR
+	roofA.Size = Vector3.new(6.6, 1.8, 3.3)
+	roofA.CFrame = CFrame.new(base + Vector3.new(0, tentHeight + 0.5, 1.65)) * CFrame.Angles(0, math.rad(180), 0)
+	roofA.Parent = hero
+
+	local roofB = roofA:Clone()
+	roofB.Name = "RoofB"
+	roofB.CFrame = CFrame.new(base + Vector3.new(0, tentHeight + 0.5, -1.65))
+	roofB.Parent = hero
+
+	local trim = Instance.new("Part")
+	trim.Name = "RoofTrim"
+	trim.Anchored = true
+	trim.CanCollide = false
+	trim.Material = Enum.Material.SmoothPlastic
+	trim.Color = TENT_TRIM_COLOR
+	trim.Size = Vector3.new(6.7, 0.2, 0.3)
+	trim.CFrame = CFrame.new(base + Vector3.new(0, tentHeight + 0.5, 0))
+	trim.Parent = hero
+
+	local desk = Instance.new("Part")
+	desk.Name = "Desk"
+	desk.Anchored = true
+	desk.CanCollide = true
+	desk.Material = Enum.Material.WoodPlanks
+	desk.Color = DESK_COLOR
+	desk.Size = Vector3.new(4.4, 0.25, 1.8)
+	desk.CFrame = CFrame.new(base + Vector3.new(0, 2.2, 0))
+	desk.Parent = hero
+	hero.PrimaryPart = desk
+
+	for _, side in ipairs({ -1, 1 }) do
+		for _, endSign in ipairs({ -1, 1 }) do
+			local leg = Instance.new("Part")
+			leg.Name = "DeskLeg"
+			leg.Anchored = true
+			leg.CanCollide = false
+			leg.Material = Enum.Material.WoodPlanks
+			leg.Color = DESK_COLOR
+			leg.Size = Vector3.new(0.2, 2.1, 0.2)
+			leg.CFrame = desk.CFrame * CFrame.new(side * 2, -1.1, endSign * 0.8)
+			leg.Parent = hero
+		end
+	end
+
+	buildFreelanceDetails(zoneModel, floor, desk)
 
 	return hero
 end
