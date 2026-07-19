@@ -1,14 +1,17 @@
 -- Purchasable zones: locked floor + name/price BillboardGui + ProximityPrompt
 -- (HoldDuration 0.5 = confirm-by-hold, native equivalent of a Y/N prompt).
--- On buy: EconomyService debit + MarkZoneOwned + build animation.
+-- On buy: EconomyService debit + MarkZoneOwned + build animation +
+-- zone.onPurchase callback for hustle-specific activation.
 --
--- Step 5 registers ONE placeholder zone to prove the pattern; Step 6 wires
--- the real hustle zones (Rideshare, Dog Walking, Freelance Gig Hub) on top.
+-- Zones registered here: Rideshare, Dog Walking, Freelance Gig Hub (Step 6),
+-- Lottery Ticket Booth (Step 7). DoorDash isn't a zone (always unlocked) —
+-- IncomeSourceService spawns those houses at server init.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage.Shared.Config.PlanetHustleConfig)
 local EconomyService = require(script.Parent.EconomyService)
+local IncomeSourceService = require(script.Parent.IncomeSourceService)
 local LotteryService = require(script.Parent.LotteryService)
 local NumberFormatter = require(ReplicatedStorage.Shared.Modules.NumberFormatter)
 
@@ -22,18 +25,21 @@ type ZoneDef = {
 	size: Vector3,
 	lockedColor: Color3,
 	ownedColor: Color3,
-	onPurchase: ((zoneFloor: BasePart) -> ())?,
+	onPurchase: ((owner: Player, zoneFloor: BasePart) -> ())?,
 }
 
 local ZONES: { ZoneDef } = {
 	{
-		id = "test_zone",
-		name = "Test Zone",
-		price = 50,
-		position = Vector3.new(50, 0.5, 0),
+		id = "rideshare",
+		name = "Rideshare Runs",
+		price = Config.Rideshare.unlockCost,
+		position = Vector3.new(0, 0.5, 50),
 		size = Vector3.new(12, 1, 12),
-		lockedColor = Color3.fromRGB(60, 60, 90),
-		ownedColor = Color3.fromRGB(85, 200, 120),
+		lockedColor = Color3.fromRGB(90, 50, 50),
+		ownedColor = Color3.fromRGB(220, 90, 90),
+		onPurchase = function(_owner, zoneFloor)
+			IncomeSourceService.ActivateRideshare(zoneFloor)
+		end,
 	},
 	{
 		id = "lottery",
@@ -43,8 +49,32 @@ local ZONES: { ZoneDef } = {
 		size = Vector3.new(12, 1, 12),
 		lockedColor = Color3.fromRGB(70, 40, 90),
 		ownedColor = Color3.fromRGB(180, 90, 220),
-		onPurchase = function(zoneFloor)
+		onPurchase = function(_owner, zoneFloor)
 			LotteryService.ActivateBooth(zoneFloor)
+		end,
+	},
+	{
+		id = "dog_walking",
+		name = "Dog Walking Service",
+		price = Config.DogWalking.unlockCost,
+		position = Vector3.new(50, 0.5, 50),
+		size = Vector3.new(12, 1, 12),
+		lockedColor = Color3.fromRGB(90, 70, 40),
+		ownedColor = Color3.fromRGB(200, 160, 100),
+		onPurchase = function(_owner, zoneFloor)
+			IncomeSourceService.ActivateDogWalking(zoneFloor)
+		end,
+	},
+	{
+		id = "freelance_gig_hub",
+		name = "Freelance Gig Hub",
+		price = Config.FreelanceGigHub.unlockCost,
+		position = Vector3.new(-50, 0.5, 50),
+		size = Vector3.new(12, 1, 12),
+		lockedColor = Color3.fromRGB(50, 70, 90),
+		ownedColor = Color3.fromRGB(100, 180, 240),
+		onPurchase = function(owner, _zoneFloor)
+			IncomeSourceService.ActivateFreelanceHub(owner)
 		end,
 	},
 }
@@ -210,7 +240,7 @@ function ZoneService.SyncPlayerZones(player: Player)
 			if floor then
 				applyOwnedVisuals(floor, zone, false)
 				if zone.onPurchase then
-					zone.onPurchase(floor)
+					zone.onPurchase(player, floor)
 				end
 			end
 		end
@@ -243,7 +273,7 @@ function ZoneService.AttemptPurchase(player: Player, zoneId: string): boolean
 	applyOwnedVisuals(floor, zone, true)
 	showFloatingText(floor, "PURCHASED!", Color3.fromRGB(85, 255, 127))
 	if zone.onPurchase then
-		zone.onPurchase(floor)
+		zone.onPurchase(player, floor)
 	end
 	return true
 end

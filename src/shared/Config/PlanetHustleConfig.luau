@@ -10,6 +10,7 @@ PlanetHustleConfig.DoorDash = {
 PlanetHustleConfig.Rideshare = {
 	unlockCost = 150,
 	rewardPerLoop = 5,
+	cooldown = 5,
 }
 
 PlanetHustleConfig.Lottery = {
@@ -30,6 +31,7 @@ PlanetHustleConfig.Lottery = {
 PlanetHustleConfig.DogWalking = {
 	unlockCost = 800,
 	rewardPerLoop = 15,
+	cooldown = 10,
 }
 
 PlanetHustleConfig.FreelanceGigHub = {
