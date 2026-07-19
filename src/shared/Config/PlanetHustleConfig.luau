@@ -73,7 +73,36 @@ PlanetHustleConfig.DogWalking = {
 	-- Now the always-free starter (swapped roles with DoorDash) - no
 	-- unlockCost, available the moment a player's plot exists.
 	rewardPerLoop = 15,
-	cooldown = 10,
+	cooldown = 10, -- seconds, tier 0 (no Speed upgrade)
+
+	-- Value track. Each tier REPLACES the previous (not stacked) - tier N's
+	-- multiplier applies directly to rewardPerLoop.
+	valueTiers = {
+		{ name = "Better Leashes", cost = 20, multiplier = 1.5 },
+		{ name = "Treats & Toys", cost = 150, multiplier = 2 },
+		{ name = "Premium Grooming Add-on", cost = 600, multiplier = 3 },
+	},
+
+	-- Speed track. Each tier replaces the previous cooldown (seconds).
+	speedTiers = {
+		{ name = "Comfortable Shoes", cost = 30, cooldown = 6 },
+		{ name = "Golf Cart", cost = 200, cooldown = 3 },
+		{ name = "E-Bike Delivery Route", cost = 800, cooldown = 1.5 },
+	},
+
+	-- "Hire a Dog Walker" - one-time purchase, flips Dog Walking from
+	-- manual-only to auto-triggering (manual E-press still works, just
+	-- resets the station's own timer rather than stacking).
+	managerCost = 2000,
+
+	-- Neighborhood Upgrade: the one Scale tier this pass builds (DoorDash's
+	-- own Office Building tier is a separate future pass). Multiplies the
+	-- BASE reward for BOTH Dog Walking and DoorDash, since they share one
+	-- neighborhood - tracked on the profile at the top level, not nested
+	-- under either hustle. At max Value+Speed+this: 15 * 3 * 2 / 1.5 = $60/s,
+	-- ~1.2x Freelance Gig Hub's $50/s passive ceiling.
+	neighborhoodUpgradeCost = 10000,
+	neighborhoodUpgradeMultiplier = 2,
 }
 
 PlanetHustleConfig.FreelanceGigHub = {

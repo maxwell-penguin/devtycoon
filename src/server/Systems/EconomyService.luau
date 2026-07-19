@@ -15,7 +15,7 @@ local playerStore = DataStoreService:GetDataStore("PlanetHustle_PlayerData_v1")
 
 local EconomyService = {}
 
--- profiles[player] = { cash, ownedZones: {[zoneId]: true}, doorDash: {...} }
+-- profiles[player] = { cash, ownedZones, doorDash, dogWalking, neighborhoodTier }
 type DoorDashState = {
 	valueTier: number, -- 0 = none, index into Config.DoorDash.valueTiers otherwise
 	speedTier: number,
@@ -23,7 +23,20 @@ type DoorDashState = {
 	scaleTier: number, -- 0 = "Houses", index into Config.DoorDash.scaleTiers otherwise
 	houseCount: number,
 }
-local profiles: { [Player]: { cash: number, ownedZones: { [string]: boolean }, doorDash: DoorDashState } } = {}
+type DogWalkingState = {
+	valueTier: number, -- 0 = none, index into Config.DogWalking.valueTiers otherwise
+	speedTier: number,
+	hasManager: boolean,
+}
+local profiles: {
+	[Player]: {
+		cash: number,
+		ownedZones: { [string]: boolean },
+		doorDash: DoorDashState,
+		dogWalking: DogWalkingState,
+		neighborhoodTier: number, -- 0 = none, 1 = Neighborhood Upgrade. Shared: boosts both hustles' base reward.
+	},
+} = {}
 
 local function defaultDoorDash(): DoorDashState
 	return {
@@ -35,8 +48,22 @@ local function defaultDoorDash(): DoorDashState
 	}
 end
 
+local function defaultDogWalking(): DogWalkingState
+	return {
+		valueTier = 0,
+		speedTier = 0,
+		hasManager = false,
+	}
+end
+
 local function defaultProfile()
-	return { cash = 0, ownedZones = {}, doorDash = defaultDoorDash() }
+	return {
+		cash = 0,
+		ownedZones = {},
+		doorDash = defaultDoorDash(),
+		dogWalking = defaultDogWalking(),
+		neighborhoodTier = 0,
+	}
 end
 
 local function withRetry(fn: () -> any): (boolean, any)
@@ -71,9 +98,15 @@ function EconomyService.LoadPlayer(player: Player)
 	end)
 
 	profiles[player] = (ok and saved) or defaultProfile()
+	-- Migrates saves from before these progression systems existed.
 	if not profiles[player].doorDash then
-		-- Migrates saves from before the DoorDash progression system existed.
 		profiles[player].doorDash = defaultDoorDash()
+	end
+	if not profiles[player].dogWalking then
+		profiles[player].dogWalking = defaultDogWalking()
+	end
+	if not profiles[player].neighborhoodTier then
+		profiles[player].neighborhoodTier = 0
 	end
 
 	local leaderstats = Instance.new("Folder")
@@ -179,6 +212,42 @@ function EconomyService.UpdateDoorDash(player: Player, patch: { [string]: any })
 	for key, value in pairs(patch) do
 		(profile.doorDash :: any)[key] = value
 	end
+end
+
+--------------------------------------------------------------------------------
+-- DOG WALKING PROGRESSION (persisted alongside cash)
+--------------------------------------------------------------------------------
+
+function EconomyService.GetDogWalkingState(player: Player): DogWalkingState?
+	local profile = profiles[player]
+	return profile and profile.dogWalking
+end
+
+function EconomyService.UpdateDogWalking(player: Player, patch: { [string]: any })
+	local profile = profiles[player]
+	if not profile then
+		return
+	end
+	for key, value in pairs(patch) do
+		(profile.dogWalking :: any)[key] = value
+	end
+end
+
+--------------------------------------------------------------------------------
+-- NEIGHBORHOOD UPGRADE (shared by Dog Walking + DoorDash, persisted alongside cash)
+--------------------------------------------------------------------------------
+
+function EconomyService.GetNeighborhoodTier(player: Player): number
+	local profile = profiles[player]
+	return profile and profile.neighborhoodTier or 0
+end
+
+function EconomyService.SetNeighborhoodTier(player: Player, tier: number)
+	local profile = profiles[player]
+	if not profile then
+		return
+	end
+	profile.neighborhoodTier = tier
 end
 
 --------------------------------------------------------------------------------
