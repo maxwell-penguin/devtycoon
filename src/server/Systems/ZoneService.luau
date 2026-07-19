@@ -28,7 +28,7 @@ type ZoneDef = {
 	position: Vector3,
 	size: Vector3,
 	ownedColor: Color3,
-	buildHero: (zoneModel: Model, floor: BasePart) -> BasePart,
+	buildHero: (zoneModel: Model, floor: BasePart) -> Model | BasePart,
 	onPurchase: ((owner: Player, zoneFloor: BasePart) -> ())?,
 }
 
@@ -57,7 +57,7 @@ local ZONES: { ZoneDef } = {
 		size = Vector3.new(12, 1, 12),
 		ownedColor = Color3.fromRGB(220, 90, 90),
 		buildHero = function(zoneModel, floor)
-			return buildPlaceholderHero(zoneModel, floor, Color3.fromRGB(220, 90, 90), Vector3.new(12, 1, 12))
+			return IncomeSourceService.BuildRideshareHero(zoneModel, floor)
 		end,
 		onPurchase = function(_owner, zoneFloor)
 			IncomeSourceService.ActivateRideshare(zoneFloor)

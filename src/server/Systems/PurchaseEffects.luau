@@ -187,30 +187,80 @@ local function particleBurst(position: Vector3, zoneModel: Instance)
 	Debris:AddItem(ring, 0.6)
 end
 
-local function riseHero(hero: BasePart, animate: boolean)
+local function getHeroPosition(hero: Model | BasePart): Vector3
+	if hero:IsA("Model") then
+		return hero:GetPivot().Position
+	end
+	return (hero :: BasePart).Position
+end
+
+-- Single Part heroes (current placeholder blocks): scale-up overshoot, same
+-- as before. Model heroes (imported multi-part assets like the Rideshare
+-- car): Model has no tweenable CFrame property, so TweenService can't
+-- animate PivotTo directly — instead we lerp a throwaway NumberValue 0->1
+-- with the same easing and drive PivotTo manually off its Changed signal.
+-- Models rise up out of the floor (position only, no scale) rather than
+-- scaling from tiny, since scaling a multi-part hierarchy frame-by-frame
+-- isn't worth the engineering cost for a one-shot cosmetic reveal.
+local function riseHero(hero: Model | BasePart, animate: boolean)
 	if not animate then
 		return
 	end
-	local finalSize = hero.Size
-	hero.Size = Vector3.new(
-		math.max(finalSize.X * 0.05, 0.2),
-		math.max(finalSize.Y * 0.05, 0.2),
-		math.max(finalSize.Z * 0.05, 0.2)
-	)
+
+	if hero:IsA("BasePart") then
+		local part = hero :: BasePart
+		local finalSize = part.Size
+		part.Size = Vector3.new(
+			math.max(finalSize.X * 0.05, 0.2),
+			math.max(finalSize.Y * 0.05, 0.2),
+			math.max(finalSize.Z * 0.05, 0.2)
+		)
+		task.delay(HERO_RISE_DELAY, function()
+			if not part.Parent then
+				return
+			end
+			TweenService:Create(part, TweenInfo.new(HERO_RISE_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+				Size = finalSize,
+			}):Play()
+		end)
+		return
+	end
+
+	local model = hero :: Model
+	local finalCFrame = model:GetPivot()
+	local _, boundingSize = model:GetBoundingBox()
+	local startCFrame = finalCFrame * CFrame.new(0, -boundingSize.Y, 0)
+	model:PivotTo(startCFrame)
+
 	task.delay(HERO_RISE_DELAY, function()
-		if not hero.Parent then
+		if not model.Parent then
 			return
 		end
-		TweenService:Create(hero, TweenInfo.new(HERO_RISE_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-			Size = finalSize,
-		}):Play()
+		local alpha = Instance.new("NumberValue")
+		alpha.Value = 0
+		alpha.Parent = model
+		local conn: RBXScriptConnection
+		conn = alpha:GetPropertyChangedSignal("Value"):Connect(function()
+			if model.Parent then
+				model:PivotTo(startCFrame:Lerp(finalCFrame, alpha.Value))
+			end
+		end)
+		local tween = TweenService:Create(alpha, TweenInfo.new(HERO_RISE_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Value = 1 })
+		tween.Completed:Connect(function()
+			conn:Disconnect()
+			if model.Parent then
+				model:PivotTo(finalCFrame)
+			end
+			alpha:Destroy()
+		end)
+		tween:Play()
 	end)
 end
 
 export type ApplyVisualsOptions = {
 	zoneModel: Model,
 	floor: BasePart,
-	hero: BasePart,
+	hero: Model | BasePart,
 	ownedColor: Color3,
 	animate: boolean,
 	buyer: Player?, -- required when animate = true
@@ -255,7 +305,7 @@ function PurchaseEffects.ApplyOwnedVisuals(opts: ApplyVisualsOptions)
 		if not floor.Parent then
 			return
 		end
-		particleBurst(hero.Position, zoneModel)
+		particleBurst(getHeroPosition(hero), zoneModel)
 		playSound(CHIME_SOUND_ID, floor, 0.6)
 	end)
 
