@@ -85,7 +85,7 @@ local ZONES: { ZoneDef } = {
 		size = Vector3.new(12, 1, 12),
 		ownedColor = Color3.fromRGB(200, 160, 100),
 		buildHero = function(zoneModel, floor)
-			return buildPlaceholderHero(zoneModel, floor, Color3.fromRGB(200, 160, 100), Vector3.new(12, 1, 12))
+			return IncomeSourceService.BuildDogWalkingHero(zoneModel, floor)
 		end,
 		onPurchase = function(_owner, zoneFloor)
 			IncomeSourceService.ActivateDogWalking(zoneFloor)

@@ -46,7 +46,21 @@ local PORCH_LIGHT_COLOR = Color3.fromRGB(255, 220, 140)
 local RIDESHARE_TAXI_ASSET_ID = 8517749330
 local RIDESHARE_BEACON_COLOR = Theme.Brand
 
-local DOG_WALKING_COLOR = Color3.fromRGB(180, 140, 90)
+-- Toolbox asset picked by name match, screenshot-verified in Studio before
+-- wiring in: "Beagle Dog" by dragonkeeper1a, free — a nicely-faceted low-
+-- poly beagle. Modeled at a much larger scale than needed (~5.8 studs tall,
+-- nearly character-height) so it gets Model:ScaleTo() down to dog-size on
+-- load. All 3 copies keep the model's natural beagle coloring — recoloring
+-- would mean guessing at this asset's internal part structure for little
+-- payoff, the tangle-of-leashes is what sells the "walking a pack" gag.
+local DOG_WALKING_DOG_ASSET_ID = 9587310814
+local DOG_WALKING_TARGET_HEIGHT = 2.2 -- studs, knee-high to a player
+local HYDRANT_COLOR = Color3.fromRGB(210, 50, 50)
+local BOWL_COLOR = Color3.fromRGB(90, 150, 200)
+local TENNIS_BALL_COLOR = Color3.fromRGB(200, 230, 60)
+local SHOE_COLOR = Color3.fromRGB(120, 80, 55)
+local PAW_PRINT_COLOR = Color3.fromRGB(60, 45, 40)
+local LEASH_POST_COLOR = Color3.fromRGB(140, 140, 145)
 
 local IncomeSourceService = {}
 
@@ -564,6 +578,253 @@ function IncomeSourceService.BuildRideshareHero(zoneModel: Model, floor: BasePar
 	return taxi
 end
 
+local function loadDogModel(): Model?
+	local ok, container = pcall(function()
+		return InsertService:LoadAsset(DOG_WALKING_DOG_ASSET_ID)
+	end)
+	local dog = ok and container and container:FindFirstChildOfClass("Model")
+	if container then
+		if dog then
+			dog.Parent = nil
+		end
+		container:Destroy()
+	end
+	return dog
+end
+
+-- Scales the (much-too-large) dog asset down to DOG_WALKING_TARGET_HEIGHT
+-- via Model:ScaleTo, then recenters+rotates it into place with the same
+-- delta-transform technique as recenterModel — ScaleTo alone scales around
+-- whatever the model's implicit pivot happens to be, which isn't
+-- necessarily where we want the dog to actually stand.
+local function scaleAndPositionDog(dog: Model, targetPosition: Vector3, targetYaw: number): Vector3
+	local _, sizeBeforeScale = dog:GetBoundingBox()
+	dog:ScaleTo(DOG_WALKING_TARGET_HEIGHT / sizeBeforeScale.Y)
+
+	local boundingCFrame, sizeAfterScale = dog:GetBoundingBox()
+	local targetCenter = CFrame.new(targetPosition + Vector3.new(0, sizeAfterScale.Y / 2, 0)) * CFrame.Angles(0, targetYaw, 0)
+	local delta = targetCenter * boundingCFrame:Inverse()
+	for _, part in ipairs(dog:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CFrame = delta * part.CFrame
+		end
+	end
+	return sizeAfterScale
+end
+
+-- Fire hydrant, dog bowl, tennis balls, "BEWARE OF DOG (he's friendly)"
+-- sign, a chewed shoe, a poop-bag dispenser, and paw-print ground decals —
+-- the suburban dog-walking details from the visual spec.
+local function buildDogWalkingDetails(zoneModel: Model, floor: BasePart)
+	local base = floor.Position + Vector3.new(0, floor.Size.Y / 2, 0)
+
+	local hydrantBody = Instance.new("Part")
+	hydrantBody.Name = "HydrantBody"
+	hydrantBody.Anchored = true
+	hydrantBody.CanCollide = true
+	hydrantBody.Material = Enum.Material.SmoothPlastic
+	hydrantBody.Color = HYDRANT_COLOR
+	hydrantBody.Size = Vector3.new(1.2, 2, 1.2)
+	hydrantBody.CFrame = CFrame.new(base + Vector3.new(4.5, 1, 4))
+	hydrantBody.Parent = zoneModel
+
+	local hydrantCap = Instance.new("Part")
+	hydrantCap.Name = "HydrantCap"
+	hydrantCap.Anchored = true
+	hydrantCap.CanCollide = false
+	hydrantCap.Material = Enum.Material.SmoothPlastic
+	hydrantCap.Color = HYDRANT_COLOR
+	hydrantCap.Size = Vector3.new(0.7, 0.4, 0.7)
+	hydrantCap.CFrame = hydrantBody.CFrame * CFrame.new(0, 1.2, 0)
+	hydrantCap.Parent = zoneModel
+
+	for _, side in ipairs({ -1, 1 }) do
+		local nub = Instance.new("Part")
+		nub.Name = "HydrantNub"
+		nub.Anchored = true
+		nub.CanCollide = false
+		nub.Material = Enum.Material.SmoothPlastic
+		nub.Color = HYDRANT_COLOR
+		nub.Size = Vector3.new(0.5, 0.5, 0.5)
+		nub.CFrame = hydrantBody.CFrame * CFrame.new(side * 0.75, 0.3, 0)
+		nub.Parent = zoneModel
+	end
+
+	local bowl = Instance.new("Part")
+	bowl.Name = "DogBowl"
+	bowl.Shape = Enum.PartType.Cylinder
+	bowl.Anchored = true
+	bowl.CanCollide = false
+	bowl.Material = Enum.Material.SmoothPlastic
+	bowl.Color = BOWL_COLOR
+	bowl.Size = Vector3.new(0.5, 1.4, 1.4)
+	bowl.CFrame = CFrame.new(base + Vector3.new(-4, 0.25, 4)) * CFrame.Angles(0, 0, math.rad(90))
+	bowl.Parent = zoneModel
+
+	for i = 1, 3 do
+		local ball = Instance.new("Part")
+		ball.Name = "TennisBall"
+		ball.Shape = Enum.PartType.Ball
+		ball.Anchored = true
+		ball.CanCollide = false
+		ball.Material = Enum.Material.SmoothPlastic
+		ball.Color = TENNIS_BALL_COLOR
+		ball.Size = Vector3.new(0.6, 0.6, 0.6)
+		ball.CFrame = CFrame.new(base + Vector3.new(-3.5 + i * 0.7, 0.3, 5.2))
+		ball.Parent = zoneModel
+	end
+
+	local signPost = Instance.new("Part")
+	signPost.Name = "BewarePost"
+	signPost.Anchored = true
+	signPost.CanCollide = false
+	signPost.Material = Enum.Material.Wood
+	signPost.Color = Color3.fromRGB(110, 80, 55)
+	signPost.Size = Vector3.new(0.3, 3.5, 0.3)
+	signPost.CFrame = CFrame.new(base + Vector3.new(4.5, 1.75, -4))
+	signPost.Parent = zoneModel
+
+	local signBoard = Instance.new("Part")
+	signBoard.Name = "BewareBoard"
+	signBoard.Anchored = true
+	signBoard.CanCollide = false
+	signBoard.Material = Enum.Material.WoodPlanks
+	signBoard.Color = Color3.fromRGB(230, 220, 200)
+	signBoard.Size = Vector3.new(2.6, 1.4, 0.15)
+	signBoard.CFrame = signPost.CFrame * CFrame.new(0, 1.2, 0)
+	signBoard.Parent = zoneModel
+
+	local signGui = Instance.new("SurfaceGui")
+	signGui.Face = Enum.NormalId.Back
+	signGui.Parent = signBoard
+	local signLabel = Instance.new("TextLabel")
+	signLabel.BackgroundTransparency = 1
+	signLabel.Size = UDim2.fromScale(1, 1)
+	signLabel.Font = Enum.Font.FredokaOne
+	signLabel.TextScaled = true
+	signLabel.TextColor3 = Color3.fromRGB(40, 30, 20)
+	signLabel.TextWrapped = true
+	signLabel.Text = "BEWARE OF DOG\n(he's friendly)"
+	signLabel.Parent = signGui
+
+	local shoe = Instance.new("Part")
+	shoe.Name = "ChewedShoe"
+	shoe.Anchored = true
+	shoe.CanCollide = false
+	shoe.Material = Enum.Material.SmoothPlastic
+	shoe.Color = SHOE_COLOR
+	shoe.Size = Vector3.new(1.4, 0.6, 0.7)
+	shoe.CFrame = CFrame.new(base + Vector3.new(-4.5, 0.3, -3.5)) * CFrame.Angles(0, math.rad(35), 0)
+	shoe.Parent = zoneModel
+
+	local dispenserPost = Instance.new("Part")
+	dispenserPost.Name = "DispenserPost"
+	dispenserPost.Anchored = true
+	dispenserPost.CanCollide = false
+	dispenserPost.Material = Enum.Material.Metal
+	dispenserPost.Color = LEASH_POST_COLOR
+	dispenserPost.Size = Vector3.new(0.3, 3, 0.3)
+	dispenserPost.CFrame = CFrame.new(base + Vector3.new(-4.5, 1.5, 4.5))
+	dispenserPost.Parent = zoneModel
+
+	local dispenserBox = Instance.new("Part")
+	dispenserBox.Name = "DispenserBox"
+	dispenserBox.Anchored = true
+	dispenserBox.CanCollide = false
+	dispenserBox.Material = Enum.Material.SmoothPlastic
+	dispenserBox.Color = Color3.fromRGB(60, 150, 90)
+	dispenserBox.Size = Vector3.new(0.9, 0.7, 0.5)
+	dispenserBox.CFrame = dispenserPost.CFrame * CFrame.new(0, 1.3, 0)
+	dispenserBox.Parent = zoneModel
+
+	for i = 1, 5 do
+		local paw = Instance.new("Part")
+		paw.Name = "PawPrint"
+		paw.Anchored = true
+		paw.CanCollide = false
+		paw.Material = Enum.Material.SmoothPlastic
+		paw.Color = PAW_PRINT_COLOR
+		paw.Transparency = 0.3
+		paw.Size = Vector3.new(0.5, 0.02, 0.5)
+		paw.CFrame = CFrame.new(base + Vector3.new(-2 + i * 0.8, 0.02, -2 + (i % 2) * 1.2))
+			* CFrame.Angles(0, math.rad(i * 25), 0)
+		paw.Parent = zoneModel
+	end
+end
+
+-- The Dog Walking "hero": a leash post with a tangle of 3 dogs on Beam
+-- leashes (CurveSize gives them a bit of sag/slack). LeashPost is the
+-- interactive part — a fixed, always-findable anchor, unlike picking one
+-- of the 3 dogs arbitrarily.
+function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, floor: BasePart): Model | BasePart
+	local hero = Instance.new("Model")
+	hero.Name = "Hero"
+	hero.Parent = zoneModel
+
+	local base = floor.Position + Vector3.new(0, floor.Size.Y / 2, 0)
+
+	local post = Instance.new("Part")
+	post.Name = "LeashPost"
+	post.Anchored = true
+	post.CanCollide = true
+	post.Material = Enum.Material.Metal
+	post.Color = LEASH_POST_COLOR
+	post.Size = Vector3.new(0.5, 3, 0.5)
+	post.CFrame = CFrame.new(base + Vector3.new(0, 1.5, 0))
+	post.Parent = hero
+	hero.PrimaryPart = post
+
+	local leashTop = Instance.new("Attachment")
+	leashTop.Name = "LeashTop"
+	leashTop.Position = Vector3.new(0, 1.4, 0)
+	leashTop.Parent = post
+
+	local dogOffsets = {
+		{ position = Vector3.new(2.2, 0, 1.2), yaw = math.rad(-30) },
+		{ position = Vector3.new(-2.0, 0, 1.6), yaw = math.rad(150) },
+		{ position = Vector3.new(0.4, 0, 2.6), yaw = math.rad(200) },
+	}
+
+	local anyDogLoaded = false
+	for i, offset in ipairs(dogOffsets) do
+		local dog = loadDogModel()
+		if dog then
+			anyDogLoaded = true
+			dog.Name = "Dog" .. i
+			dog.Parent = hero
+			local size = scaleAndPositionDog(dog, base + offset.position, offset.yaw)
+
+			local dogCenter = (dog:GetBoundingBox())
+			local collar = Instance.new("Attachment")
+			collar.Name = "Collar" .. i
+			collar.Parent = post
+			collar.WorldPosition = dogCenter.Position + Vector3.new(0, size.Y * 0.3, size.Z * 0.35)
+
+			local leash = Instance.new("Beam")
+			leash.Name = "Leash" .. i
+			leash.Attachment0 = leashTop
+			leash.Attachment1 = collar
+			leash.Width0 = 0.08
+			leash.Width1 = 0.08
+			leash.Color = ColorSequence.new(Color3.fromRGB(200, 60, 60))
+			leash.FaceCamera = true
+			leash.Segments = 3
+			leash.CurveSize0 = 0.3
+			leash.CurveSize1 = -0.3
+			leash.Parent = post
+		end
+	end
+
+	if not anyDogLoaded then
+		warn("[IncomeSourceService] Failed to load any Dog Walking asset copies, tangle will be post-only")
+	end
+
+	buildDogWalkingDetails(zoneModel, floor)
+
+	return hero
+end
+
 local function spawnDoorDashHouses(): Folder
 	local existing = workspace:FindFirstChild("DoorDashHouses")
 	if existing then
@@ -699,21 +960,21 @@ end
 -- DOG WALKING
 --------------------------------------------------------------------------------
 
+-- LeashPost (built by BuildDogWalkingHero) is the interactive part; this
+-- just attaches the prompt to it rather than spawning a separate block.
 function IncomeSourceService.ActivateDogWalking(zoneFloor: BasePart)
 	local zoneModel = zoneFloor.Parent
-	if not zoneModel or zoneModel:FindFirstChild("DogWalkingDog") then
+	if not zoneModel then
 		return
 	end
-
-	local dog = Instance.new("Part")
-	dog.Name = "DogWalkingDog"
-	dog.Anchored = true
-	dog.CanCollide = true
-	dog.Size = Vector3.new(4, 4, 4)
-	dog.Color = DOG_WALKING_COLOR
-	dog.Material = Enum.Material.SmoothPlastic
-	dog.Position = zoneFloor.Position + Vector3.new(0, 2.5, 0)
-	dog.Parent = zoneModel
+	local hero = zoneModel:FindFirstChild("Hero")
+	if not hero then
+		return
+	end
+	local post = hero:FindFirstChild("LeashPost") :: BasePart?
+	if not post or post:FindFirstChildOfClass("ProximityPrompt") then
+		return
+	end
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.ActionText = "Walk"
@@ -721,13 +982,13 @@ function IncomeSourceService.ActivateDogWalking(zoneFloor: BasePart)
 	prompt.HoldDuration = 0
 	prompt.MaxActivationDistance = 10
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
-	prompt.Parent = dog
+	prompt.Parent = post
 
 	prompt.Triggered:Connect(function(player)
-		if not checkCooldown(dogWalkingCooldowns, player, dog, Config.DogWalking.cooldown) then
+		if not checkCooldown(dogWalkingCooldowns, player, post, Config.DogWalking.cooldown) then
 			return
 		end
-		payReward(player, dog, Config.DogWalking.rewardPerLoop)
+		payReward(player, post, Config.DogWalking.rewardPerLoop)
 	end)
 end
 
