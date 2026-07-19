@@ -1133,6 +1133,69 @@ end
 -- Actually builds the houses/moped once DoorDash is unlocked (fresh
 -- purchase or already-owned rejoin) - same layout as before the role swap,
 -- just gated behind a one-time cash unlock instead of being free from spawn.
+-- Neighborhood Upgrade visual: a thin gold band on each DoorDash house plus
+-- one new apartment building at the end of the row. Called both when the
+-- upgrade is purchased (retrofits whatever houses already exist) and when
+-- houses are built later (covers buying the upgrade before ever unlocking
+-- DoorDash) - either ordering ends up looking correct.
+local function addHouseUpgradeTrim(house: BasePart)
+	if house:FindFirstChild("UpgradeTrim") then
+		return
+	end
+	local trim = Instance.new("Part")
+	trim.Name = "UpgradeTrim"
+	trim.Anchored = true
+	trim.CanCollide = false
+	trim.Material = Enum.Material.Neon
+	trim.Color = Theme.Gold
+	trim.Size = Vector3.new(house.Size.X * 1.05, 0.3, house.Size.Z * 1.05)
+	trim.CFrame = house.CFrame * CFrame.new(0, house.Size.Y * 0.42, 0)
+	trim.Parent = house
+end
+
+local function buildApartmentBuilding(areaModel: Instance, origin: Vector3)
+	if areaModel:FindFirstChild("ApartmentBuilding") then
+		return
+	end
+	local startX = -((DOOR_DASH_HOUSE_COUNT - 1) * DOOR_DASH_HOUSE_SPACING) / 2
+	local apartmentX = startX + DOOR_DASH_HOUSE_COUNT * DOOR_DASH_HOUSE_SPACING
+
+	local building = Instance.new("Part")
+	building.Name = "ApartmentBuilding"
+	building.Anchored = true
+	building.CanCollide = true
+	building.Material = Enum.Material.Concrete
+	building.Color = Color3.fromRGB(180, 175, 165)
+	building.Size = Vector3.new(8, 16, 8)
+	building.Position = origin + Vector3.new(apartmentX, 8, -30)
+	building.Parent = areaModel
+
+	for i = 1, 3 do
+		local window = Instance.new("Part")
+		window.Name = "ApartmentWindow"
+		window.Anchored = true
+		window.CanCollide = false
+		window.Material = Enum.Material.Neon
+		window.Color = Color3.fromRGB(255, 220, 140)
+		window.Size = Vector3.new(1.2, 1.2, 0.1)
+		window.CFrame = building.CFrame * CFrame.new(-2 + (i - 1) * 2, 4 - (i - 1) * 4, 4.05)
+		window.Parent = areaModel
+	end
+end
+
+local function applyNeighborhoodUpgradeVisuals(areaModel: Instance, origin: Vector3)
+	local anyHouse = false
+	for _, c in ipairs(areaModel:GetChildren()) do
+		if c.Name:match("^DoorDashHouse_") then
+			anyHouse = true
+			addHouseUpgradeTrim(c :: BasePart)
+		end
+	end
+	if anyHouse then
+		buildApartmentBuilding(areaModel, origin)
+	end
+end
+
 local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origin: Vector3)
 	local startX = -((DOOR_DASH_HOUSE_COUNT - 1) * DOOR_DASH_HOUSE_SPACING) / 2
 	local houseParts = {}
@@ -1170,6 +1233,10 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 	buildMopedHero(areaModel, origin + Vector3.new(0, 0, -22))
 
 	doorDashPlots[player] = { folder = areaModel.Parent :: Folder, origin = origin, houses = houseParts }
+
+	if EconomyService.GetNeighborhoodTier(player) > 0 then
+		applyNeighborhoodUpgradeVisuals(areaModel, origin)
+	end
 end
 
 -- DoorDash is now a cash-gated unlock inside the shared per-plot
@@ -1335,7 +1402,11 @@ function IncomeSourceService.HandleDoorDashDelivery(player: Player, house: BaseP
 	if not checkCooldown(doorDashCooldowns, player, house, Config.DoorDash.cooldown) then
 		return nil
 	end
-	local reward = math.random(Config.DoorDash.minReward, Config.DoorDash.maxReward)
+	local base = math.random(Config.DoorDash.minReward, Config.DoorDash.maxReward)
+	local neighborhoodMultiplier = if EconomyService.GetNeighborhoodTier(player) > 0
+		then Config.Neighborhood.upgradeMultiplier
+		else 1
+	local reward = math.floor(base * neighborhoodMultiplier + 0.5)
 	payReward(player, house, reward)
 	return reward
 end
@@ -1398,7 +1469,7 @@ local function getDogWalkingReward(player: Player): number
 	local valueTier = state and Config.DogWalking.valueTiers[state.valueTier]
 	local valueMultiplier = valueTier and valueTier.multiplier or 1
 	local neighborhoodMultiplier = if EconomyService.GetNeighborhoodTier(player) > 0
-		then Config.DogWalking.neighborhoodUpgradeMultiplier
+		then Config.Neighborhood.upgradeMultiplier
 		else 1
 	-- Fractional multipliers (1.5x etc.) on an integer base would otherwise
 	-- pay out fractional cash ($22.5) - round to whole dollars.
@@ -1757,6 +1828,129 @@ function IncomeSourceService.CleanupPlayerDogWalking(player: Player)
 	dogWalkingCooldowns[player] = nil
 	dogWalkingManagerActive[player] = nil
 	dogWalkingPlots[player] = nil
+end
+
+--------------------------------------------------------------------------------
+-- NEIGHBORHOOD UPGRADE (Phase 4 scale - shared by Dog Walking + DoorDash)
+--------------------------------------------------------------------------------
+
+-- Standalone (not just a Triggered closure) so it's directly callable, same
+-- as AttemptDoorDashUnlock / AttemptDogWalkingValueUpgrade.
+function IncomeSourceService.AttemptNeighborhoodUpgrade(
+	player: Player,
+	areaModel: Model,
+	origin: Vector3,
+	unlockFloor: BasePart,
+	priceGui: BillboardGui,
+	prompt: ProximityPrompt
+): boolean
+	if EconomyService.GetNeighborhoodTier(player) > 0 then
+		return false
+	end
+	if not EconomyService.CanAfford(player, Config.Neighborhood.upgradeCost) then
+		FloatingText.Show(unlockFloor, "Need $" .. NumberFormatter.Format(Config.Neighborhood.upgradeCost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, Config.Neighborhood.upgradeCost) then
+		return false
+	end
+	EconomyService.SetNeighborhoodTier(player, 1)
+
+	priceGui:Destroy()
+	prompt.Enabled = false
+	refreshDogWalkingPromptText(player)
+
+	local plot = doorDashPlots[player]
+	local doorDashArea = plot and (plot.folder:FindFirstChild("DoorDashArea") :: Instance)
+	local hero = doorDashArea and doorDashArea:FindFirstChild("MopedHero")
+	if doorDashArea then
+		applyNeighborhoodUpgradeVisuals(doorDashArea, origin)
+	end
+	PurchaseEffects.ApplyOwnedVisuals({
+		zoneModel = areaModel,
+		floor = unlockFloor,
+		hero = (hero :: Model) or unlockFloor,
+		ownedColor = Theme.Gold,
+		animate = true,
+		buyer = player,
+		resultText = "NEIGHBORHOOD UPGRADED!",
+		resultColor = Theme.Gold,
+	})
+	return true
+end
+
+-- One-time shared purchase (locked floor + price tag + hold-to-confirm
+-- prompt, same pattern as DoorDash's unlock) sitting between the Dog
+-- Walking and DoorDash areas since it boosts both.
+function IncomeSourceService.SetupPlayerNeighborhoodUpgrade(player: Player, folder: Folder, origin: Vector3)
+	local areaModel = Instance.new("Model")
+	areaModel.Name = "NeighborhoodUpgradeArea"
+	areaModel.Parent = folder
+
+	if EconomyService.GetNeighborhoodTier(player) > 0 then
+		return
+	end
+
+	local unlockFloor = Instance.new("Part")
+	unlockFloor.Name = "Floor"
+	unlockFloor.Anchored = true
+	unlockFloor.CanCollide = false
+	unlockFloor.Size = Vector3.new(8, 1, 8)
+	unlockFloor.Position = origin + Vector3.new(0, 0.5, -3)
+	unlockFloor.Color = Theme.Locked
+	unlockFloor.Material = Enum.Material.Neon
+	unlockFloor.Transparency = 0.5
+	unlockFloor.Parent = areaModel
+
+	local priceGui = Instance.new("BillboardGui")
+	priceGui.Name = "PriceTag"
+	priceGui.Adornee = unlockFloor
+	priceGui.Size = UDim2.new(0, 220, 0, 72)
+	priceGui.StudsOffset = Vector3.new(0, 5, 0)
+	priceGui.AlwaysOnTop = true
+	priceGui.MaxDistance = 100
+	priceGui.Parent = unlockFloor
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "Name"
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Position = UDim2.fromScale(0, 0)
+	nameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextScaled = true
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	nameLabel.TextStrokeTransparency = 0.3
+	nameLabel.Text = "Neighborhood Upgrade"
+	nameLabel.Parent = priceGui
+
+	local priceLabel = Instance.new("TextLabel")
+	priceLabel.Name = "Price"
+	priceLabel.BackgroundTransparency = 1
+	priceLabel.Position = UDim2.fromScale(0, 0.5)
+	priceLabel.Size = UDim2.new(1, 0, 0.5, 0)
+	priceLabel.Font = Enum.Font.GothamBold
+	priceLabel.TextScaled = true
+	priceLabel.TextColor3 = Theme.Gold
+	priceLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	priceLabel.TextStrokeTransparency = 0.3
+	priceLabel.Text = "$" .. NumberFormatter.Format(Config.Neighborhood.upgradeCost)
+	priceLabel.Parent = priceGui
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Upgrade"
+	prompt.ObjectText = "Neighborhood Upgrade ($" .. NumberFormatter.Format(Config.Neighborhood.upgradeCost) .. ")"
+	prompt.HoldDuration = 0.5
+	prompt.MaxActivationDistance = 14
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.Parent = unlockFloor
+
+	prompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
+		IncomeSourceService.AttemptNeighborhoodUpgrade(player, areaModel, origin, unlockFloor, priceGui, prompt)
+	end)
 end
 
 --------------------------------------------------------------------------------

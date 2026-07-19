@@ -69,6 +69,7 @@ function PlotService.AssignPlot(player: Player)
 
 	IncomeSourceService.SetupPlayerDogWalking(player, folder, origin)
 	IncomeSourceService.SetupPlayerDoorDash(player, folder, origin)
+	IncomeSourceService.SetupPlayerNeighborhoodUpgrade(player, folder, origin)
 
 	if player.Character then
 		task.spawn(teleportToPlot, player.Character, origin)

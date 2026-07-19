@@ -94,15 +94,17 @@ PlanetHustleConfig.DogWalking = {
 	-- manual-only to auto-triggering (manual E-press still works, just
 	-- resets the station's own timer rather than stacking).
 	managerCost = 2000,
+}
 
-	-- Neighborhood Upgrade: the one Scale tier this pass builds (DoorDash's
-	-- own Office Building tier is a separate future pass). Multiplies the
-	-- BASE reward for BOTH Dog Walking and DoorDash, since they share one
-	-- neighborhood - tracked on the profile at the top level, not nested
-	-- under either hustle. At max Value+Speed+this: 15 * 3 * 2 / 1.5 = $60/s,
-	-- ~1.2x Freelance Gig Hub's $50/s passive ceiling.
-	neighborhoodUpgradeCost = 10000,
-	neighborhoodUpgradeMultiplier = 2,
+-- Neighborhood Upgrade: the one Scale tier this pass builds (DoorDash's own
+-- Office Building tier is a separate future pass). One shared purchase that
+-- multiplies the BASE reward for BOTH Dog Walking and DoorDash, since they
+-- share one neighborhood plot - lives at the top level rather than nested
+-- under either hustle's config. At max Dog Walking Value+Speed+this:
+-- 15 * 3 * 2 / 1.5 = $60/s, ~1.2x Freelance Gig Hub's $50/s passive ceiling.
+PlanetHustleConfig.Neighborhood = {
+	upgradeCost = 10000,
+	upgradeMultiplier = 2,
 }
 
 PlanetHustleConfig.FreelanceGigHub = {
