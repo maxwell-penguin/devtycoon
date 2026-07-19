@@ -105,6 +105,7 @@ type DogWalkingPlot = {
 	folder: Folder,
 	origin: Vector3,
 	hero: Model,
+	prompt: ProximityPrompt?,
 }
 local dogWalkingPlots: { [Player]: DogWalkingPlot } = {}
 
@@ -1379,18 +1380,59 @@ end
 -- DOG WALKING (always-free per-plot starter — swapped roles with DoorDash)
 --------------------------------------------------------------------------------
 
+-- state.valueTier/speedTier (0 = none) index directly into the tier arrays
+-- (1-based) - tier N bought means valueTiers[N] is the active tier. Reads
+-- live every payout so kiosk purchases and the (future) Neighborhood
+-- Upgrade apply immediately without touching this call site again.
+local function getDogWalkingCooldown(player: Player): number
+	local state = EconomyService.GetDogWalkingState(player)
+	local tier = state and Config.DogWalking.speedTiers[state.speedTier]
+	return tier and tier.cooldown or Config.DogWalking.cooldown
+end
+
+local function getDogWalkingReward(player: Player): number
+	local state = EconomyService.GetDogWalkingState(player)
+	local valueTier = state and Config.DogWalking.valueTiers[state.valueTier]
+	local valueMultiplier = valueTier and valueTier.multiplier or 1
+	local neighborhoodMultiplier = if EconomyService.GetNeighborhoodTier(player) > 0
+		then Config.DogWalking.neighborhoodUpgradeMultiplier
+		else 1
+	-- Fractional multipliers (1.5x etc.) on an integer base would otherwise
+	-- pay out fractional cash ($22.5) - round to whole dollars.
+	return math.floor(Config.DogWalking.rewardPerLoop * valueMultiplier * neighborhoodMultiplier + 0.5)
+end
+
+local function refreshDogWalkingPromptText(player: Player)
+	local plot = dogWalkingPlots[player]
+	if not plot or not plot.prompt then
+		return
+	end
+	plot.prompt.ObjectText = "Dog (+$" .. getDogWalkingReward(player) .. ")"
+end
+
+-- Standalone (not just a Triggered closure) so it's directly callable, same
+-- as HandleDoorDashDelivery.
+function IncomeSourceService.HandleDogWalkingDelivery(player: Player, post: BasePart): number?
+	if not checkCooldown(dogWalkingCooldowns, player, post, getDogWalkingCooldown(player)) then
+		return nil
+	end
+	local reward = getDogWalkingReward(player)
+	payReward(player, post, reward)
+	return reward
+end
+
 -- LeashPost (built by BuildDogWalkingHero) is the interactive part; this
 -- just attaches the prompt to it. Owner-gated like DoorDash's houses since
 -- this now lives in the player's own plot, not a shared world zone.
-function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model)
+function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model): ProximityPrompt?
 	local post = hero:FindFirstChild("LeashPost") :: BasePart?
 	if not post or post:FindFirstChildOfClass("ProximityPrompt") then
-		return
+		return nil
 	end
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.ActionText = "Walk"
-	prompt.ObjectText = "Dog (+$" .. Config.DogWalking.rewardPerLoop .. ")"
+	prompt.ObjectText = "Dog (+$" .. getDogWalkingReward(player) .. ")"
 	prompt.HoldDuration = 0
 	prompt.MaxActivationDistance = 10
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
@@ -1400,20 +1442,167 @@ function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model)
 		if triggeredBy ~= player then
 			return
 		end
-		if not checkCooldown(dogWalkingCooldowns, player, post, Config.DogWalking.cooldown) then
-			return
-		end
-		payReward(player, post, Config.DogWalking.rewardPerLoop)
+		IncomeSourceService.HandleDogWalkingDelivery(player, post)
 	end)
+
+	return prompt
 end
 
--- Builds the always-free Dog Walking station in a player's shared
--- neighborhood plot — no purchase, available the moment the plot exists.
+-- One physical sign per track (Value / Speed) rather than a multi-button
+-- menu - reuses the same single-ProximityPrompt hold-to-confirm purchase
+-- pattern as everything else. Triggering buys whichever tier is next in
+-- that track's list; the sign re-renders to the tier after that, or "MAXED".
+local function buildDogWalkingTierKiosk(folder: Instance, position: Vector3, trackLabel: string, boardColor: Color3)
+	local post = Instance.new("Part")
+	post.Name = trackLabel .. "KioskPost"
+	post.Anchored = true
+	post.CanCollide = false
+	post.Material = Enum.Material.Metal
+	post.Color = Color3.fromRGB(150, 150, 155)
+	post.Size = Vector3.new(0.3, 3, 0.3)
+	post.CFrame = CFrame.new(position)
+	post.Parent = folder
+
+	local board = Instance.new("Part")
+	board.Name = trackLabel .. "KioskBoard"
+	board.Anchored = true
+	board.CanCollide = false
+	board.Material = Enum.Material.SmoothPlastic
+	board.Color = boardColor
+	board.Size = Vector3.new(3, 1.8, 0.2)
+	board.CFrame = post.CFrame * CFrame.new(0, 2.1, 0)
+	board.Parent = folder
+
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Back
+	gui.Parent = board
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Name = "Title"
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Position = UDim2.fromScale(0, 0)
+	titleLabel.Size = UDim2.new(1, 0, 0.32, 0)
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.TextScaled = true
+	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	titleLabel.Text = trackLabel
+	titleLabel.Parent = gui
+
+	local statusLabel = Instance.new("TextLabel")
+	statusLabel.Name = "Status"
+	statusLabel.BackgroundTransparency = 1
+	statusLabel.Position = UDim2.fromScale(0, 0.32)
+	statusLabel.Size = UDim2.new(1, 0, 0.68, 0)
+	statusLabel.Font = Enum.Font.GothamBold
+	statusLabel.TextScaled = true
+	statusLabel.TextColor3 = Theme.Gold
+	statusLabel.TextWrapped = true
+	statusLabel.Parent = gui
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.HoldDuration = 0.5
+	prompt.MaxActivationDistance = 12
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.Parent = board
+
+	return board, statusLabel, prompt
+end
+
+local function refreshValueKioskDisplay(player: Player, statusLabel: TextLabel, prompt: ProximityPrompt)
+	local state = EconomyService.GetDogWalkingState(player)
+	local nextTier = Config.DogWalking.valueTiers[state.valueTier + 1]
+	if nextTier then
+		statusLabel.Text = nextTier.name .. "\n$" .. NumberFormatter.Format(nextTier.cost)
+		prompt.ActionText = "Upgrade"
+		prompt.ObjectText = nextTier.name .. " ($" .. NumberFormatter.Format(nextTier.cost) .. ")"
+		prompt.Enabled = true
+	else
+		statusLabel.Text = "MAXED"
+		prompt.Enabled = false
+	end
+end
+
+local function refreshSpeedKioskDisplay(player: Player, statusLabel: TextLabel, prompt: ProximityPrompt)
+	local state = EconomyService.GetDogWalkingState(player)
+	local nextTier = Config.DogWalking.speedTiers[state.speedTier + 1]
+	if nextTier then
+		statusLabel.Text = nextTier.name .. "\n$" .. NumberFormatter.Format(nextTier.cost)
+		prompt.ActionText = "Upgrade"
+		prompt.ObjectText = nextTier.name .. " ($" .. NumberFormatter.Format(nextTier.cost) .. ")"
+		prompt.Enabled = true
+	else
+		statusLabel.Text = "MAXED"
+		prompt.Enabled = false
+	end
+end
+
+-- Standalone (not just a Triggered closure) so it's directly callable, same
+-- as ZoneService.AttemptPurchase / AttemptDoorDashUnlock.
+function IncomeSourceService.AttemptDogWalkingValueUpgrade(player: Player, board: BasePart, statusLabel: TextLabel, prompt: ProximityPrompt): boolean
+	local state = EconomyService.GetDogWalkingState(player)
+	local nextTier = Config.DogWalking.valueTiers[state.valueTier + 1]
+	if not nextTier then
+		return false
+	end
+	if not EconomyService.CanAfford(player, nextTier.cost) then
+		FloatingText.Show(board, "Need $" .. NumberFormatter.Format(nextTier.cost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, nextTier.cost) then
+		return false
+	end
+	EconomyService.UpdateDogWalking(player, { valueTier = state.valueTier + 1 })
+	FloatingText.Show(board, nextTier.name .. "!", Theme.CashPositive)
+	refreshValueKioskDisplay(player, statusLabel, prompt)
+	refreshDogWalkingPromptText(player)
+	return true
+end
+
+function IncomeSourceService.AttemptDogWalkingSpeedUpgrade(player: Player, board: BasePart, statusLabel: TextLabel, prompt: ProximityPrompt): boolean
+	local state = EconomyService.GetDogWalkingState(player)
+	local nextTier = Config.DogWalking.speedTiers[state.speedTier + 1]
+	if not nextTier then
+		return false
+	end
+	if not EconomyService.CanAfford(player, nextTier.cost) then
+		FloatingText.Show(board, "Need $" .. NumberFormatter.Format(nextTier.cost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, nextTier.cost) then
+		return false
+	end
+	EconomyService.UpdateDogWalking(player, { speedTier = state.speedTier + 1 })
+	FloatingText.Show(board, nextTier.name .. "!", Theme.CashPositive)
+	refreshSpeedKioskDisplay(player, statusLabel, prompt)
+	return true
+end
+
+-- Builds the always-free Dog Walking station + its Value/Speed upgrade
+-- kiosks in a player's shared neighborhood plot — no purchase to unlock the
+-- station itself, available the moment the plot exists.
 function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folder, origin: Vector3)
 	local base = origin + Vector3.new(0, 0, 15)
 	local hero = IncomeSourceService.BuildDogWalkingHero(folder, base)
-	dogWalkingPlots[player] = { folder = folder, origin = origin, hero = hero }
-	IncomeSourceService.ActivateDogWalking(player, hero)
+	local prompt = IncomeSourceService.ActivateDogWalking(player, hero)
+	dogWalkingPlots[player] = { folder = folder, origin = origin, hero = hero, prompt = prompt }
+
+	local valueBoard, valueStatus, valuePrompt = buildDogWalkingTierKiosk(folder, base + Vector3.new(-6, 0, 3), "Value", Theme.Brand)
+	refreshValueKioskDisplay(player, valueStatus, valuePrompt)
+	valuePrompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
+		IncomeSourceService.AttemptDogWalkingValueUpgrade(player, valueBoard, valueStatus, valuePrompt)
+	end)
+
+	local speedBoard, speedStatus, speedPrompt = buildDogWalkingTierKiosk(folder, base + Vector3.new(6, 0, 3), "Speed", Theme.Secondary)
+	refreshSpeedKioskDisplay(player, speedStatus, speedPrompt)
+	speedPrompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
+		IncomeSourceService.AttemptDogWalkingSpeedUpgrade(player, speedBoard, speedStatus, speedPrompt)
+	end)
 end
 
 function IncomeSourceService.CleanupPlayerDogWalking(player: Player)
