@@ -1595,6 +1595,10 @@ function IncomeSourceService.AddDoorDashExtraHouses(player: Player, count: numbe
 			startDoorDashHouseLoop(player, house)
 		end
 	end
+	-- Persist the new count - without this, a rejoin's extraCount
+	-- calculation in buildDoorDashNeighborhood would see the stale saved
+	-- count and silently fail to rebuild these houses.
+	EconomyService.UpdateDoorDash(player, { houseCount = #plot.houses })
 end
 
 -- Vehicle tier escalation (Phase 4): each tier REPLACES DoorDash's hero prop
