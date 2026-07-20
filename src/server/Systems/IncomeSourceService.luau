@@ -5,8 +5,13 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
 
 local InsertService = game:GetService("InsertService")
+
+local DOG_WALKING_CLICK_REMOTE = "DogWalkingClick"
+local DOG_WALKING_CLICKABLE_TAG = "DogWalkingClickable"
+local DOG_WALKING_REWARD_STAT = "DogWalkingReward"
 
 local Config = require(ReplicatedStorage.Shared.Config.PlanetHustleConfig)
 local Theme = require(ReplicatedStorage.Shared.Config.Theme)
@@ -2120,6 +2125,26 @@ function IncomeSourceService.Init()
 		IncomeSourceService.CleanupPlayerDogWalking(player)
 		IncomeSourceService.DeactivateFreelanceHub(player)
 	end)
+
+	local remotes = ReplicatedStorage:WaitForChild("Remotes")
+	local clickRemote = Instance.new("RemoteEvent")
+	clickRemote.Name = DOG_WALKING_CLICK_REMOTE
+	clickRemote.Parent = remotes
+	clickRemote.OnServerEvent:Connect(function(player: Player, post: any)
+		-- Validate: real BasePart, tagged as a Dog Walking post, and
+		-- inside the sender's own plot folder (Neighborhood_<UserId>).
+		if typeof(post) ~= "Instance" or not post:IsA("BasePart") then
+			return
+		end
+		if not CollectionService:HasTag(post, DOG_WALKING_CLICKABLE_TAG) then
+			return
+		end
+		local plot = dogWalkingPlots[player]
+		if not plot or not post:IsDescendantOf(plot.folder) then
+			return
+		end
+		IncomeSourceService.HandleDogWalkingDelivery(player, post)
+	end)
 end
 
 function IncomeSourceService.SetupPlayer(player: Player)
@@ -2131,6 +2156,11 @@ function IncomeSourceService.SetupPlayer(player: Player)
 	incomePerSecond.Name = "IncomePerSecond"
 	incomePerSecond.Value = 0
 	incomePerSecond.Parent = stats
+
+	local dogWalkingReward = Instance.new("NumberValue")
+	dogWalkingReward.Name = DOG_WALKING_REWARD_STAT
+	dogWalkingReward.Value = 0
+	dogWalkingReward.Parent = stats
 end
 
 function IncomeSourceService.GetIncomePerSecond(player: Player): number
@@ -2219,18 +2249,16 @@ local function getDogWalkingReward(player: Player): number
 	return math.floor(Config.DogWalking.rewardPerLoop * valueMultiplier * neighborhoodMultiplier + 0.5)
 end
 
-local function refreshDogWalkingPromptText(player: Player)
-	local plot = dogWalkingPlots[player]
-	if not plot then
-		return
-	end
-	local text = "Click to Walk\n(+$" .. getDogWalkingReward(player) .. ")"
-	for _, station in pairs(plot.stations) do
-		local gui = station.post:FindFirstChild("ClickLabel")
-		local label = gui and gui:FindFirstChild("Label")
-		if label then
-			(label :: TextLabel).Text = text
-		end
+-- The client's on-screen Walk button reads its reward from this
+-- PlanetHustleStats/DogWalkingReward NumberValue (same pattern as
+-- IncomePerSecond, which HUDController already listens to). Called on
+-- every event that could change getDogWalkingReward's output (Value tier,
+-- Neighborhood Upgrade, initial station-plot setup).
+local function refreshDogWalkingReward(player: Player)
+	local stats = getStatsFolder(player)
+	local value = stats and stats:FindFirstChild(DOG_WALKING_REWARD_STAT)
+	if value then
+		(value :: NumberValue).Value = getDogWalkingReward(player)
 	end
 end
 
@@ -2245,51 +2273,21 @@ function IncomeSourceService.HandleDogWalkingDelivery(player: Player, post: Base
 	return reward
 end
 
--- LeashPost (built by BuildDogWalkingHero) is the clickable part - a simple
--- click-and-collect button (ClickDetector) rather than a walk-up-and-hold-E
--- prompt, so the manual step reads as "click a button" like Sell Lemons'
--- lemon stand rather than "walk to a delivery location". Owner-gated like
--- DoorDash's houses since this lives in the player's own plot.
-function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model): ClickDetector?
+-- LeashPost (built by BuildDogWalkingHero) is tagged so the client's Walk
+-- button UI can find it by CollectionService and show/hide based on
+-- proximity to the player's HumanoidRootPart. Clicking the on-screen
+-- button fires the DogWalkingClick RemoteEvent (wired in Init) which
+-- routes back to HandleDogWalkingDelivery here, keeping the reward /
+-- cooldown path unchanged. Owner-gating: the plot folder is named
+-- Neighborhood_<UserId>, and the server-side handler re-checks that the
+-- fired post belongs to the sender's own plot before paying out.
+function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model)
 	local post = hero:FindFirstChild("LeashPost") :: BasePart?
-	if not post or post:FindFirstChildOfClass("ClickDetector") then
-		return nil
+	if not post then
+		return
 	end
-
-	local clickDetector = Instance.new("ClickDetector")
-	clickDetector.MaxActivationDistance = 16
-	clickDetector.Parent = post
-
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "ClickLabel"
-	gui.Adornee = post
-	gui.Size = UDim2.new(0, 150, 0, 56)
-	gui.StudsOffset = Vector3.new(0, 3.2, 0)
-	gui.AlwaysOnTop = true
-	gui.MaxDistance = 60
-	gui.Parent = post
-
-	local label = Instance.new("TextLabel")
-	label.Name = "Label"
-	label.BackgroundTransparency = 1
-	label.Size = UDim2.fromScale(1, 1)
-	label.Font = Enum.Font.GothamBold
-	label.TextScaled = true
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-	label.TextStrokeTransparency = 0.2
-	label.TextWrapped = true
-	label.Text = "Click to Walk\n(+$" .. getDogWalkingReward(player) .. ")"
-	label.Parent = gui
-
-	clickDetector.MouseClick:Connect(function(clicker)
-		if clicker ~= player then
-			return
-		end
-		IncomeSourceService.HandleDogWalkingDelivery(player, post)
-	end)
-
-	return clickDetector
+	CollectionService:AddTag(post, DOG_WALKING_CLICKABLE_TAG)
+	refreshDogWalkingReward(player)
 end
 
 -- Auto-collect loop for one station: fires HandleDogWalkingDelivery on the
@@ -2364,7 +2362,7 @@ function IncomeSourceService.AttemptDogWalkingValueUpgrade(player: Player, board
 	EconomyService.UpdateDogWalking(player, { valueTier = state.valueTier + 1 })
 	FloatingText.Show(board, nextTier.name .. "!", Theme.CashPositive)
 	refreshValueKioskDisplay(player, statusLabel, pad)
-	refreshDogWalkingPromptText(player)
+	refreshDogWalkingReward(player)
 	return true
 end
 
@@ -2534,7 +2532,7 @@ function IncomeSourceService.AttemptDogWalkingStationPurchase(
 
 	priceGui:Destroy()
 	local hero = buildDogWalkingStation(player, folder, position, stationIndex)
-	refreshDogWalkingPromptText(player)
+	refreshDogWalkingReward(player)
 
 	PurchaseEffects.ApplyOwnedVisuals({
 		zoneModel = folder,
@@ -2683,7 +2681,7 @@ function IncomeSourceService.AttemptNeighborhoodUpgrade(
 
 	priceGui:Destroy()
 	pad:Destroy()
-	refreshDogWalkingPromptText(player)
+	refreshDogWalkingReward(player)
 
 	local plot = doorDashPlots[player]
 	local doorDashArea = plot and (plot.folder:FindFirstChild("DoorDashArea") :: Instance)
