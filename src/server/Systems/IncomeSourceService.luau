@@ -2006,6 +2006,13 @@ function IncomeSourceService.ActivateRideshare(zoneFloor: BasePart)
 	prompt.Parent = triggerPart
 
 	prompt.Triggered:Connect(function(player)
+		-- Rideshare is a shared-world zone (no per-player-plot), but
+		-- ownership is still tracked per-player - only someone who has
+		-- personally bought this zone can collect from the shared Hero,
+		-- not any passerby.
+		if not EconomyService.IsZoneOwned(player, "rideshare") then
+			return
+		end
 		if not checkCooldown(rideshareCooldowns, player, triggerPart :: BasePart, Config.Rideshare.cooldown) then
 			return
 		end

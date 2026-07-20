@@ -111,6 +111,12 @@ local function checkCooldown(player: Player, booth: BasePart): boolean
 end
 
 local function onBoothTriggered(booth: BasePart, player: Player)
+	-- Lottery is a shared-world zone (no per-player-plot) - ownership is
+	-- still tracked per-player, so only someone who has personally bought
+	-- this zone can play, not any passerby.
+	if not EconomyService.IsZoneOwned(player, "lottery") then
+		return
+	end
 	if not checkCooldown(player, booth) then
 		return
 	end
