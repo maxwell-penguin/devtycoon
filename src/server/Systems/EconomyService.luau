@@ -21,12 +21,20 @@ type DoorDashState = {
 	speedTier: number,
 	hasManager: boolean,
 	vehicleTier: number, -- 0 = Bike/Moped (start), index into Config.DoorDash.vehicleTiers otherwise
-	houseCount: number,
+	-- Which of house slots 1-8 are built. 1-4 = starting row (individually
+	-- pad-purchased, Phase 4 - no longer bundled free with unlockCost).
+	-- 5-6 = Cargo Plane's auto-grant (unchanged). 7-8 = pads beyond that.
+	-- A set, not a count: slots are purchased in whatever order the player
+	-- walks up to them, not necessarily 1,2,3,4 in sequence.
+	ownedHouseSlots: { [number]: boolean },
 }
 type DogWalkingState = {
 	valueTier: number, -- 0 = none, index into Config.DogWalking.valueTiers otherwise
 	speedTier: number,
 	hasManager: boolean,
+	-- Which of the 2 extra stations (beyond the always-free station 1) are
+	-- built. Index 1 = station 2, index 2 = station 3.
+	extraStations: { [number]: boolean },
 }
 local profiles: {
 	[Player]: {
@@ -44,7 +52,7 @@ local function defaultDoorDash(): DoorDashState
 		speedTier = 0,
 		hasManager = false,
 		vehicleTier = 0,
-		houseCount = Config.DoorDash.startingHouseCount,
+		ownedHouseSlots = {},
 	}
 end
 
@@ -53,6 +61,7 @@ local function defaultDogWalking(): DogWalkingState
 		valueTier = 0,
 		speedTier = 0,
 		hasManager = false,
+		extraStations = {},
 	}
 end
 
@@ -108,11 +117,25 @@ function EconomyService.LoadPlayer(player: Player)
 		-- vehicle tier escalation).
 		profiles[player].doorDash.vehicleTier = 0
 	end
-	if not profiles[player].doorDash.houseCount then
-		profiles[player].doorDash.houseCount = Config.DoorDash.startingHouseCount
+	if not profiles[player].doorDash.ownedHouseSlots then
+		-- Migrates saves from before house slots were individually
+		-- pad-purchased (Phase 4) - grandfather in whatever the old
+		-- houseCount field says they had (the old model always built
+		-- slots 1..N in that fixed order, so this is exact, not a guess).
+		local legacyCount = (profiles[player].doorDash :: any).houseCount or 0
+		local slots = {}
+		for i = 1, legacyCount do
+			slots[i] = true
+		end
+		profiles[player].doorDash.ownedHouseSlots = slots
+		local legacyDoorDash = profiles[player].doorDash :: any
+		legacyDoorDash.houseCount = nil
 	end
 	if not profiles[player].dogWalking then
 		profiles[player].dogWalking = defaultDogWalking()
+	end
+	if not profiles[player].dogWalking.extraStations then
+		profiles[player].dogWalking.extraStations = {}
 	end
 	if not profiles[player].neighborhoodTier then
 		profiles[player].neighborhoodTier = 0

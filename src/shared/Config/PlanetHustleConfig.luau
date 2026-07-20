@@ -9,8 +9,20 @@ PlanetHustleConfig.DoorDash = {
 	minReward = 1,
 	maxReward = 3,
 	cooldown = 3, -- seconds per house, tier 0 (no Speed upgrade)
-	startingHouseCount = 4,
 	maxHouseCount = 8,
+
+	-- Phase 4 (purchase-pad branch): the neighborhood now starts genuinely
+	-- empty - these 4 original row houses used to be bundled free with
+	-- unlockCost, now each is its own pad purchase. Deliberately cheap/fast
+	-- (Sell Lemons-style early economy - big numbers come later from a
+	-- future prestige/rebirth system, not from Planet Hustle itself).
+	startingHouseCosts = { 50, 150, 350, 750 },
+
+	-- 2 more pads beyond Cargo Plane's existing auto-granted 5th/6th house
+	-- (unchanged - see vehicleTiers below), reaching maxHouseCount=8.
+	-- Deliberately steep: a late-game chase for players already deep in,
+	-- not part of the fast early loop.
+	extraHousePadCosts = { 50000, 150000 },
 
 	-- Phase 2: Value track. Cash-gated, no Manager required. Each tier
 	-- REPLACES the previous one (not stacked) - tier N's multiplier applies
@@ -104,6 +116,11 @@ PlanetHustleConfig.DogWalking = {
 	-- manual-only to auto-triggering (manual E-press still works, just
 	-- resets the station's own timer rather than stacking).
 	managerCost = 2000,
+
+	-- Phase 4 (purchase-pad branch): 2 more stations beyond the original
+	-- free one, each a full LeashPost+dogs prop with its own ClickDetector
+	-- and Manager auto-collect loop.
+	stationCosts = { 300, 1500 },
 }
 
 -- Neighborhood Upgrade: the one Scale tier this pass builds (DoorDash's own
