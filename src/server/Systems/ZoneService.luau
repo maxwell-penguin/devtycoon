@@ -1,7 +1,12 @@
--- Purchasable zones: locked floor + name/price BillboardGui + ProximityPrompt
--- (HoldDuration 0.5 = confirm-by-hold, native equivalent of a Y/N prompt).
--- On buy: EconomyService debit + MarkZoneOwned + PurchaseEffects money-shot
--- + zone.onPurchase callback for hustle-specific activation.
+-- Purchasable zones: locked floor + name/price BillboardGui + stand-on-pad
+-- auto-purchase (touch it, and if affordable, it just buys - no button
+-- press). On buy: EconomyService debit + MarkZoneOwned + PurchaseEffects
+-- money-shot + zone.onPurchase callback for hustle-specific activation.
+--
+-- These 3 zones are shared-world (one Zone_x model total, not per-player-
+-- plot), so the pad has no owner-restriction on WHO can attempt a purchase -
+-- any player can walk up and buy their own copy. AttemptPurchase already
+-- gates on that specific player's own ownedZones flag internally.
 --
 -- Each zone supplies buildHero(zoneModel, floor) which constructs its final-
 -- state hero prop (and any per-zone decorative details) the first time the
@@ -18,6 +23,7 @@ local LotteryService = require(script.Parent.LotteryService)
 local PurchaseEffects = require(script.Parent.PurchaseEffects)
 local FloatingText = require(ReplicatedStorage.Shared.Modules.FloatingText)
 local NumberFormatter = require(ReplicatedStorage.Shared.Modules.NumberFormatter)
+local PurchasePad = require(ReplicatedStorage.Shared.Modules.PurchasePad)
 
 local ZoneService = {}
 
@@ -89,9 +95,9 @@ local function applyOwnedVisuals(zoneModel: Model, floor: BasePart, zone: ZoneDe
 	if priceTag then
 		priceTag:Destroy()
 	end
-	local prompt = floor:FindFirstChildOfClass("ProximityPrompt")
-	if prompt then
-		prompt.Enabled = false
+	local pad = zoneModel:FindFirstChild("Pad")
+	if pad then
+		pad:Destroy()
 	end
 
 	if zoneModel:FindFirstChild("Hero") then
@@ -163,17 +169,17 @@ local function spawnZone(zone: ZoneDef)
 	priceLabel.Text = "$" .. NumberFormatter.Format(zone.price)
 	priceLabel.Parent = priceGui
 
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = "Buy"
-	prompt.ObjectText = zone.name .. " ($" .. NumberFormatter.Format(zone.price) .. ")"
-	prompt.HoldDuration = 0.5
-	prompt.MaxActivationDistance = 14
-	prompt.KeyboardKeyCode = Enum.KeyCode.E
-	prompt.Parent = floor
-
-	prompt.Triggered:Connect(function(player)
-		ZoneService.AttemptPurchase(player, zone.id)
-	end)
+	local pad = PurchasePad.Build(
+		model,
+		floor.Position + Vector3.new(0, floor.Size.Y / 2 + 0.5, 0),
+		zone.ownedColor,
+		math.min(zone.size.X, zone.size.Z) / 2 - 1
+	)
+	PurchasePad.Wire(pad, function(_player)
+		return true -- shared-world zone: anyone can attempt, AttemptPurchase gates per-player ownership
+	end, function(player)
+		return ZoneService.AttemptPurchase(player, zone.id)
+	end, true)
 
 	zoneFloors[zone.id] = floor
 end
