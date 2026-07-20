@@ -22,11 +22,15 @@ PlanetHustleConfig.DoorDash = {
 	},
 
 	-- Phase 2: Speed track. Cash-gated. Each tier replaces the previous
-	-- per-house cooldown (seconds).
+	-- per-house cooldown (seconds). Deliberately gentler than Dog Walking's
+	-- floor (1.5s vs 1.5s... but DoorDash has 4-6 SIMULTANEOUS houses once
+	-- Manager is hired, so its aggregate $/s multiplies by house count - a
+	-- 0.5s floor here (an earlier dormant draft's number) would have blown
+	-- way past the target ceiling once combined with Vehicle tiers below.
 	speedTiers = {
-		{ name = "E-Bike", cost = 75, cooldown = 2 },
-		{ name = "Scooter Upgrade", cost = 300, cooldown = 1 },
-		{ name = "Drone Delivery", cost = 1200, cooldown = 0.5 },
+		{ name = "Tuned Engine", cost = 75, cooldown = 2.5 },
+		{ name = "Bigger Fuel Tank", cost = 300, cooldown = 2 },
+		{ name = "Racing Slicks", cost = 1200, cooldown = 1.5 },
 	},
 
 	-- Phase 3: "Hire a Dispatcher" - one-time purchase, flips DoorDash from
@@ -34,17 +38,23 @@ PlanetHustleConfig.DoorDash = {
 	-- resets that house's own timer rather than stacking).
 	managerCost = 4000,
 
-	-- Phase 4: Scale. Requires Manager owned first. Extra houses beyond
-	-- startingHouseCount, up to maxHouseCount, priced individually and
-	-- escalating (index 1 = house 5's cost, etc).
-	extraHouseCosts = { 1500, 2500, 4000, 6000 },
-
-	-- Phase 4: Scale tiers reskin the whole neighborhood and multiply the
-	-- BASE reward roll (applied before the Value track multiplier). Tier 0
-	-- ("Houses") is the starting look, implicit multiplier 1.
-	scaleTiers = {
-		{ name = "Neighborhood Upgrade", cost = 15000, baseMultiplier = 2 },
-		{ name = "Office Building", cost = 50000, baseMultiplier = 5 },
+	-- Phase 4: Vehicle tier escalation - DoorDash's OWN scale identity,
+	-- distinct from Dog Walking's neighborhood-growth scale. Each tier
+	-- REPLACES the previous (not stacked): valueMultiplier stacks
+	-- multiplicatively with the Value track, cooldownMultiplier applies to
+	-- whatever the Speed track achieved. Deliberately modest per-tier bumps -
+	-- Cargo Plane's headline feature is +2 houses (extraHouses), not a huge
+	-- number, since 4-6 simultaneous houses already does most of the
+	-- heavy lifting on the aggregate $/s ceiling.
+	-- Full-investment math: 2(avgBase) * 3(Value) * 1.33(CargoPlane) *
+	-- 2(Neighborhood) / (1.5s * 0.8) * 6 houses ≈ $80/s - ~1.33x Dog
+	-- Walking's $60/s ceiling, ~1.6x Freelance's $50/s, both within the
+	-- requested 1.2-1.8x band.
+	vehicleTiers = {
+		{ name = "Delivery Van", cost = 5000, valueMultiplier = 1.1, cooldownMultiplier = 0.95 },
+		{ name = "Drone Fleet", cost = 12000, valueMultiplier = 1.18, cooldownMultiplier = 0.9 },
+		{ name = "Helicopter", cost = 30000, valueMultiplier = 1.25, cooldownMultiplier = 0.85 },
+		{ name = "Cargo Plane", cost = 75000, valueMultiplier = 1.33, cooldownMultiplier = 0.8, extraHouses = 2 },
 	},
 }
 

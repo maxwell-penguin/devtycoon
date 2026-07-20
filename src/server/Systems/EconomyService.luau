@@ -20,7 +20,7 @@ type DoorDashState = {
 	valueTier: number, -- 0 = none, index into Config.DoorDash.valueTiers otherwise
 	speedTier: number,
 	hasManager: boolean,
-	scaleTier: number, -- 0 = "Houses", index into Config.DoorDash.scaleTiers otherwise
+	vehicleTier: number, -- 0 = Bike/Moped (start), index into Config.DoorDash.vehicleTiers otherwise
 	houseCount: number,
 }
 type DogWalkingState = {
@@ -43,7 +43,7 @@ local function defaultDoorDash(): DoorDashState
 		valueTier = 0,
 		speedTier = 0,
 		hasManager = false,
-		scaleTier = 0,
+		vehicleTier = 0,
 		houseCount = Config.DoorDash.startingHouseCount,
 	}
 end
@@ -101,6 +101,15 @@ function EconomyService.LoadPlayer(player: Player)
 	-- Migrates saves from before these progression systems existed.
 	if not profiles[player].doorDash then
 		profiles[player].doorDash = defaultDoorDash()
+	end
+	if not profiles[player].doorDash.vehicleTier then
+		-- Renamed from scaleTier (an earlier, since-replaced Neighborhood-
+		-- Upgrade-style draft for DoorDash's own Phase 4 - superseded by the
+		-- vehicle tier escalation).
+		profiles[player].doorDash.vehicleTier = 0
+	end
+	if not profiles[player].doorDash.houseCount then
+		profiles[player].doorDash.houseCount = Config.DoorDash.startingHouseCount
 	end
 	if not profiles[player].dogWalking then
 		profiles[player].dogWalking = defaultDogWalking()
