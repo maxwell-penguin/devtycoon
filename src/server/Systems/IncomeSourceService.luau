@@ -17,7 +17,6 @@ local NumberFormatter = require(ReplicatedStorage.Shared.Modules.NumberFormatter
 local PurchasePad = require(ReplicatedStorage.Shared.Modules.PurchasePad)
 
 local DOOR_DASH_HOUSE_COUNT = 4
-local DOOR_DASH_HOUSE_SPACING = 20
 local FLASH_COLOR = Theme.CashPositive
 
 -- Toolbox asset picked by name/thumbnail match — "Pizza Delivery Bike Vehicle
@@ -188,8 +187,11 @@ end
 -- Generic tier-upgrade kiosk builder - one physical sign per track rather
 -- than a multi-button menu, shared by both Dog Walking and DoorDash (and any
 -- future hustle that gets this same Value/Speed pattern). Placed early in
--- the file since both hustles' sections below need it.
-local function buildTierKiosk(folder: Instance, position: Vector3, trackLabel: string, boardColor: Color3)
+-- the file since both hustles' sections below need it. `cframe` positions
+-- the post and orients the board's readable face — pad ends up on the
+-- readable side automatically (local +Z of the post, matching SurfaceGui
+-- Face.Back).
+local function buildTierKiosk(folder: Instance, cframe: CFrame, trackLabel: string, boardColor: Color3)
 	local post = Instance.new("Part")
 	post.Name = trackLabel .. "KioskPost"
 	post.Anchored = true
@@ -197,7 +199,7 @@ local function buildTierKiosk(folder: Instance, position: Vector3, trackLabel: s
 	post.Material = Enum.Material.Metal
 	post.Color = Color3.fromRGB(150, 150, 155)
 	post.Size = Vector3.new(0.3, 3, 0.3)
-	post.CFrame = CFrame.new(position)
+	post.CFrame = cframe
 	post.Parent = folder
 
 	local board = Instance.new("Part")
@@ -238,8 +240,9 @@ local function buildTierKiosk(folder: Instance, position: Vector3, trackLabel: s
 
 	-- Stand-on-pad at the sign's foot, instead of a ProximityPrompt on the
 	-- board - the sign stays as the "what am I buying" display, the pad is
-	-- the touch-to-buy trigger.
-	local pad = PurchasePad.Build(folder, position + Vector3.new(0, -1.4, 2.5), boardColor, 2.5)
+	-- the touch-to-buy trigger. Placed on the readable side (local +Z of the
+	-- post) so pad direction rotates with the kiosk.
+	local pad = PurchasePad.Build(folder, (cframe * CFrame.new(0, -1.4, 2.5)).Position, boardColor, 2.5)
 
 	return board, statusLabel, pad
 end
@@ -1272,8 +1275,6 @@ local function buildApartmentBuilding(areaModel: Instance, origin: Vector3)
 	if areaModel:FindFirstChild("ApartmentBuilding") then
 		return
 	end
-	local startX = -((DOOR_DASH_HOUSE_COUNT - 1) * DOOR_DASH_HOUSE_SPACING) / 2
-	local apartmentX = startX + DOOR_DASH_HOUSE_COUNT * DOOR_DASH_HOUSE_SPACING
 
 	local building = Instance.new("Part")
 	building.Name = "ApartmentBuilding"
@@ -1282,7 +1283,10 @@ local function buildApartmentBuilding(areaModel: Instance, origin: Vector3)
 	building.Material = Enum.Material.Concrete
 	building.Color = Color3.fromRGB(180, 175, 165)
 	building.Size = Vector3.new(8, 16, 8)
-	building.Position = origin + Vector3.new(apartmentX, 8, -30)
+	-- Sits at north-center of the loop between houses 6+7, facing -Z (south)
+	-- into the park. Rotating the building rotates its window CFrames below
+	-- along with it, so they end up on the south face automatically.
+	building.CFrame = CFrame.new(origin + Vector3.new(0, 8, 40)) * CFrame.Angles(0, math.rad(180), 0)
 	building.Parent = areaModel
 
 	for i = 1, 3 do
@@ -1428,7 +1432,10 @@ local function buildDispatcherNpc(folder: Instance, origin: Vector3): Model
 	npc.Name = "DispatcherNpc"
 	npc.Parent = folder
 
-	local startPos = origin + Vector3.new(-30, 3, -27)
+	-- East outer sidewalk (X=+33, just outside the loop's east road). Yaw
+	-- +90° so local +X = world +Z: the patrol below walks along the
+	-- sidewalk and the torso "faces" -X (into the park).
+	local startCFrame = CFrame.new(origin + Vector3.new(33, 3, -25)) * CFrame.Angles(0, math.rad(90), 0)
 
 	local torso = Instance.new("Part")
 	torso.Name = "Torso"
@@ -1437,7 +1444,7 @@ local function buildDispatcherNpc(folder: Instance, origin: Vector3): Model
 	torso.Material = Enum.Material.SmoothPlastic
 	torso.Color = Theme.Brand
 	torso.Size = Vector3.new(1.4, 2, 0.8)
-	torso.CFrame = CFrame.new(startPos)
+	torso.CFrame = startCFrame
 	torso.Parent = npc
 	npc.PrimaryPart = torso
 
@@ -1475,7 +1482,7 @@ local function buildDispatcherNpc(folder: Instance, origin: Vector3): Model
 	package.Parent = npc
 
 	local pointA = torso.CFrame
-	local pointB = torso.CFrame * CFrame.new(60, 0, 0)
+	local pointB = torso.CFrame * CFrame.new(50, 0, 0)
 	loopModelBetweenPoints(npc, pointA, pointB, 8)
 
 	return npc
@@ -1539,35 +1546,37 @@ function IncomeSourceService.AttemptDoorDashManagerHire(
 	return true
 end
 
--- Slots 5-8 sit behind the main row (not extending it sideways) - extending
--- in +X would collide with the ApartmentBuilding the Neighborhood Upgrade
--- places at startX + DOOR_DASH_HOUSE_COUNT*spacing, and could approach a
--- neighboring plot's footprint (PLOT_ORIGINS are 80 studs apart in X).
--- 5-6 = Cargo Plane's auto-grant (unchanged mechanic). 7-8 = new pads
--- beyond it (purchase-pad branch), one row further back.
-local DOOR_DASH_EXTRA_HOUSE_OFFSETS = {
-	Vector3.new(-12, 4, -55), -- slot 5
-	Vector3.new(12, 4, -55), -- slot 6
-	Vector3.new(-12, 4, -75), -- slot 7
-	Vector3.new(12, 4, -75), -- slot 8
+-- Slots 5-8 sit on the loop's NORTH side, flanking the ApartmentBuilding
+-- (placed at X=0 by the Neighborhood Upgrade), facing -Z into the park.
+-- 5-6 = Cargo Plane's auto-grant; 7-8 = pad-purchased extras (Phase 4).
+-- All 4 north-side slots share the same +40 Z and 180° yaw.
+local DOOR_DASH_EXTRA_HOUSE_SLOTS = {
+	{ pos = Vector3.new(-22, 4, 40), yaw = math.rad(180) }, -- slot 5 (NW corner)
+	{ pos = Vector3.new(-11, 4, 40), yaw = math.rad(180) }, -- slot 6
+	{ pos = Vector3.new(11, 4, 40), yaw = math.rad(180) }, -- slot 7
+	{ pos = Vector3.new(22, 4, 40), yaw = math.rad(180) }, -- slot 8 (NE corner)
 }
 
--- Where slot `index` (1-8) sits, relative to the plot origin. 1-4 are the
--- original row; 5+ come from the offsets table above.
-local function doorDashHousePosition(origin: Vector3, index: number): Vector3
+-- Where slot `index` (1-8) sits, relative to the plot origin, including yaw
+-- so the house's door + porch details face the loop's park center. 1-4 are
+-- the east-side row at X=+30 (yaw +90° → door faces -X); 5-8 come from the
+-- north-side slot table above.
+local function doorDashHouseCFrame(origin: Vector3, index: number): CFrame
 	if index <= DOOR_DASH_HOUSE_COUNT then
-		local startX = -((DOOR_DASH_HOUSE_COUNT - 1) * DOOR_DASH_HOUSE_SPACING) / 2
-		return origin + Vector3.new(startX + (index - 1) * DOOR_DASH_HOUSE_SPACING, 4, -30)
+		local zSpacing = 16
+		local z = -((DOOR_DASH_HOUSE_COUNT - 1) * zSpacing) / 2 + (index - 1) * zSpacing
+		return CFrame.new(origin + Vector3.new(30, 4, z)) * CFrame.Angles(0, math.rad(90), 0)
 	end
-	return origin + DOOR_DASH_EXTRA_HOUSE_OFFSETS[index - DOOR_DASH_HOUSE_COUNT]
+	local slot = DOOR_DASH_EXTRA_HOUSE_SLOTS[index - DOOR_DASH_HOUSE_COUNT]
+	return CFrame.new(origin + slot.pos) * CFrame.Angles(0, slot.yaw, 0)
 end
 
-local function buildHouseAt(player: Player, areaModel: Model, position: Vector3, index: number): BasePart
+local function buildHouseAt(player: Player, areaModel: Model, cframe: CFrame, index: number): BasePart
 	local house = Instance.new("Part")
 	house.Name = "DoorDashHouse_" .. index
 	house.Size = Vector3.new(8, 8, 8)
 	house.Anchored = true
-	house.Position = position
+	house.CFrame = cframe
 	house.Color = DOOR_DASH_HOUSE_COLORS[((index - 1) % #DOOR_DASH_HOUSE_COLORS) + 1]
 	house.Material = Enum.Material.Wood
 	house.Parent = areaModel
@@ -1618,8 +1627,8 @@ end
 -- caller) - shared by the initial neighborhood build, a purchase's success
 -- path, and Cargo Plane's auto-grant.
 local function buildDoorDashOwnedHouse(player: Player, areaModel: Model, plot: DoorDashPlot, index: number)
-	local position = doorDashHousePosition(plot.origin, index)
-	local house = buildHouseAt(player, areaModel, position, index)
+	local cframe = doorDashHouseCFrame(plot.origin, index)
+	local house = buildHouseAt(player, areaModel, cframe, index)
 	if EconomyService.GetNeighborhoodTier(player) > 0 then
 		addHouseUpgradeTrim(house)
 	end
@@ -1693,13 +1702,13 @@ local function refreshDoorDashHouseSlot(player: Player, areaModel: Model, plot: 
 		return
 	end
 
-	local position = doorDashHousePosition(plot.origin, index)
+	local houseCFrame = doorDashHouseCFrame(plot.origin, index)
 	local lotFloor = Instance.new("Part")
 	lotFloor.Name = "HouseLot_" .. index
 	lotFloor.Anchored = true
 	lotFloor.CanCollide = false
 	lotFloor.Size = Vector3.new(8, 0.5, 8)
-	lotFloor.Position = position - Vector3.new(0, 3.75, 0)
+	lotFloor.Position = houseCFrame.Position - Vector3.new(0, 3.75, 0)
 	lotFloor.Color = Theme.Locked
 	lotFloor.Material = Enum.Material.Neon
 	lotFloor.Transparency = 0.5
@@ -1934,7 +1943,12 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		buildDoorDashVehicleHero(areaModel, origin, state.vehicleTier)
 	end
 
-	local valueBoard, valueStatus, valuePad = buildTierKiosk(areaModel, origin + Vector3.new(-24, 0, -24), "Value", Theme.Brand)
+	-- All 4 DoorDash kiosks live on the east inner sidewalk of the loop,
+	-- interleaved with the 4 east-side houses; rotated so their readable face
+	-- points -X (toward the park center), matching the direction the houses
+	-- and the player approach them from.
+	local eastKioskYaw = math.rad(90)
+	local valueBoard, valueStatus, valuePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(22, 0, -18)) * CFrame.Angles(0, eastKioskYaw, 0), "Value", Theme.Brand)
 	refreshDoorDashValueKioskDisplay(player, valueStatus, valuePad)
 	PurchasePad.Wire(valuePad, function(p)
 		return p == player
@@ -1942,7 +1956,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		return IncomeSourceService.AttemptDoorDashValueUpgrade(p, valueBoard, valueStatus, valuePad)
 	end, false)
 
-	local speedBoard, speedStatus, speedPad = buildTierKiosk(areaModel, origin + Vector3.new(24, 0, -24), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(22, 0, 18)) * CFrame.Angles(0, eastKioskYaw, 0), "Speed", Theme.Secondary)
 	refreshDoorDashSpeedKioskDisplay(player, speedStatus, speedPad)
 	PurchasePad.Wire(speedPad, function(p)
 		return p == player
@@ -1950,7 +1964,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		return IncomeSourceService.AttemptDoorDashSpeedUpgrade(p, speedBoard, speedStatus, speedPad)
 	end, false)
 
-	local managerBoard, managerStatus, managerPad = buildTierKiosk(areaModel, origin + Vector3.new(-8, 0, -24), "Manager", Theme.Gold)
+	local managerBoard, managerStatus, managerPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(22, 0, -8)) * CFrame.Angles(0, eastKioskYaw, 0), "Manager", Theme.Gold)
 	if state.hasManager then
 		managerStatus.Text = "HIRED"
 		managerPad.Transparency = 0.7
@@ -1965,7 +1979,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		end, true)
 	end
 
-	local vehicleBoard, vehicleStatus, vehiclePad = buildTierKiosk(areaModel, origin + Vector3.new(8, 0, -24), "Vehicle", Theme.AffordablePulse)
+	local vehicleBoard, vehicleStatus, vehiclePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(22, 0, 8)) * CFrame.Angles(0, eastKioskYaw, 0), "Vehicle", Theme.AffordablePulse)
 	refreshDoorDashVehicleKioskDisplay(player, vehicleStatus, vehiclePad)
 	PurchasePad.Wire(vehiclePad, function(p)
 		return p == player
@@ -2375,10 +2389,15 @@ end
 -- The "Dog Walker" hired NPC: a primitive blocky figure with a 4th leashed
 -- dog, pacing a short loop near the station so automation feels alive
 -- without any pathfinding.
-local function buildDogWalkerNpc(folder: Instance, base: Vector3): Model
+local function buildDogWalkerNpc(folder: Instance, origin: Vector3): Model
 	local npc = Instance.new("Model")
 	npc.Name = "DogWalkerNpc"
 	npc.Parent = folder
+
+	-- West outer sidewalk (X=-33, just outside the loop's west road). Yaw
+	-- -90° so local +Z = world +X: the torso "faces" +X (into the park) and
+	-- the patrol below runs along the sidewalk in world Z.
+	local startCFrame = CFrame.new(origin + Vector3.new(-33, 3, -12)) * CFrame.Angles(0, math.rad(-90), 0)
 
 	local torso = Instance.new("Part")
 	torso.Name = "Torso"
@@ -2387,7 +2406,7 @@ local function buildDogWalkerNpc(folder: Instance, base: Vector3): Model
 	torso.Material = Enum.Material.SmoothPlastic
 	torso.Color = Theme.Secondary
 	torso.Size = Vector3.new(1.4, 2, 0.8)
-	torso.CFrame = CFrame.new(base + Vector3.new(-4, 3, -2))
+	torso.CFrame = startCFrame
 	torso.Parent = npc
 	npc.PrimaryPart = torso
 
@@ -2418,11 +2437,14 @@ local function buildDogWalkerNpc(folder: Instance, base: Vector3): Model
 	if dog then
 		dog.Name = "WalkerDog"
 		dog.Parent = npc
-		scaleAndPositionDog(dog, base + Vector3.new(-5.5, 0, -2), math.rad(90))
+		-- Dog walks slightly ahead of the walker in the patrol direction
+		-- (local -X = world +Z with the yaw above), so as the model reverses
+		-- the pack visually leads.
+		scaleAndPositionDog(dog, (startCFrame * CFrame.new(-1.5, -3, 0)).Position, math.rad(0))
 	end
 
 	local pointA = torso.CFrame
-	local pointB = torso.CFrame * CFrame.new(9, 0, 0)
+	local pointB = torso.CFrame * CFrame.new(-24, 0, 0)
 	loopModelBetweenPoints(npc, pointA, pointB, 4)
 
 	return npc
@@ -2431,7 +2453,7 @@ end
 function IncomeSourceService.AttemptDogWalkingManagerHire(
 	player: Player,
 	folder: Instance,
-	base: Vector3,
+	origin: Vector3,
 	board: BasePart,
 	statusLabel: TextLabel,
 	pad: BasePart
@@ -2453,7 +2475,7 @@ function IncomeSourceService.AttemptDogWalkingManagerHire(
 	pad.Transparency = 0.7
 	FloatingText.Show(board, "Dog Walker Hired!", Theme.CashPositive)
 
-	buildDogWalkerNpc(folder, base)
+	buildDogWalkerNpc(folder, origin)
 	IncomeSourceService.StartDogWalkingManagerLoops(player)
 	return true
 end
@@ -2473,12 +2495,12 @@ function IncomeSourceService.StartDogWalkingManagerLoops(player: Player)
 	end
 end
 
--- Positions for stations 2-3 (Phase 4) - station 1 keeps its original
--- `base` spot. Flanks it, clear of both the original dog tangle and the
--- Value/Speed/Manager kiosk row at base+(x,0,5).
+-- Positions for stations 2-3 (Phase 4). All three Dog Walking stations sit
+-- on the loop's WEST side at X=-30, spaced 20 studs apart in Z. Station 1
+-- is at Z=-20 (see SetupPlayerDogWalking); these two flank it to the north.
 local DOG_WALKING_EXTRA_STATION_OFFSETS = {
-	Vector3.new(-25, 0, 20),
-	Vector3.new(25, 0, 20),
+	Vector3.new(-30, 0, 0),
+	Vector3.new(-30, 0, 20),
 }
 
 -- Standalone (not just a Triggered closure) so it's directly callable, same
@@ -2579,16 +2601,20 @@ end
 -- extra stations + the Value/Speed/Manager kiosks in a player's shared
 -- neighborhood plot.
 function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folder, origin: Vector3)
-	local base = origin + Vector3.new(0, 0, 15)
+	-- Station 1 is the always-free starter, southwest slot on the loop.
+	local station1Position = origin + Vector3.new(-30, 0, -20)
 	dogWalkingPlots[player] = { folder = folder, origin = origin, stations = {} }
 
-	buildDogWalkingStation(player, folder, base, 1)
+	buildDogWalkingStation(player, folder, station1Position, 1)
 
 	for i, offset in ipairs(DOG_WALKING_EXTRA_STATION_OFFSETS) do
 		buildDogWalkingStationSlot(player, folder, origin, i + 1, offset, Config.DogWalking.stationCosts[i])
 	end
 
-	local valueBoard, valueStatus, valuePad = buildTierKiosk(folder, base + Vector3.new(-8, 0, 5), "Value", Theme.Brand)
+	-- All 3 Dog Walking kiosks live on the west inner sidewalk of the loop,
+	-- rotated so their readable face points +X (toward the park center).
+	local westKioskYaw = math.rad(-90)
+	local valueBoard, valueStatus, valuePad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-22, 0, -10)) * CFrame.Angles(0, westKioskYaw, 0), "Value", Theme.Brand)
 	refreshValueKioskDisplay(player, valueStatus, valuePad)
 	PurchasePad.Wire(valuePad, function(p)
 		return p == player
@@ -2596,7 +2622,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		return IncomeSourceService.AttemptDogWalkingValueUpgrade(p, valueBoard, valueStatus, valuePad)
 	end, false)
 
-	local speedBoard, speedStatus, speedPad = buildTierKiosk(folder, base + Vector3.new(8, 0, 5), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-22, 0, 10)) * CFrame.Angles(0, westKioskYaw, 0), "Speed", Theme.Secondary)
 	refreshSpeedKioskDisplay(player, speedStatus, speedPad)
 	PurchasePad.Wire(speedPad, function(p)
 		return p == player
@@ -2604,19 +2630,19 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		return IncomeSourceService.AttemptDogWalkingSpeedUpgrade(p, speedBoard, speedStatus, speedPad)
 	end, false)
 
-	local managerBoard, managerStatus, managerPad = buildTierKiosk(folder, base + Vector3.new(0, 0, 5), "Manager", Theme.Gold)
+	local managerBoard, managerStatus, managerPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-22, 0, 0)) * CFrame.Angles(0, westKioskYaw, 0), "Manager", Theme.Gold)
 	local dogWalkingState = EconomyService.GetDogWalkingState(player)
 	if dogWalkingState.hasManager then
 		managerStatus.Text = "HIRED"
 		managerPad.Transparency = 0.7
-		buildDogWalkerNpc(folder, base)
+		buildDogWalkerNpc(folder, origin)
 		IncomeSourceService.StartDogWalkingManagerLoops(player)
 	else
 		managerStatus.Text = "Hire a Dog Walker\n$" .. NumberFormatter.Format(Config.DogWalking.managerCost)
 		PurchasePad.Wire(managerPad, function(p)
 			return p == player
 		end, function(p)
-			return IncomeSourceService.AttemptDogWalkingManagerHire(p, folder, base, managerBoard, managerStatus, managerPad)
+			return IncomeSourceService.AttemptDogWalkingManagerHire(p, folder, origin, managerBoard, managerStatus, managerPad)
 		end, true)
 	end
 end
@@ -2693,7 +2719,8 @@ function IncomeSourceService.SetupPlayerNeighborhoodUpgrade(player: Player, fold
 	unlockFloor.Anchored = true
 	unlockFloor.CanCollide = false
 	unlockFloor.Size = Vector3.new(8, 1, 8)
-	unlockFloor.Position = origin + Vector3.new(0, 0.5, -3)
+	-- North inner park, symmetric to the DoorDash unlock/vehicle bay at Z=-18.
+	unlockFloor.Position = origin + Vector3.new(0, 0.5, 18)
 	unlockFloor.Color = Theme.Locked
 	unlockFloor.Material = Enum.Material.Neon
 	unlockFloor.Transparency = 0.5
