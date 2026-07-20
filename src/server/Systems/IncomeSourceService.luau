@@ -159,6 +159,80 @@ local function payReward(player: Player, station: BasePart, reward: number)
 	FloatingText.Show(station, "+$" .. reward, Theme.CashPositive)
 end
 
+-- Generic tier-upgrade kiosk builder - one physical sign per track rather
+-- than a multi-button menu, shared by both Dog Walking and DoorDash (and any
+-- future hustle that gets this same Value/Speed pattern). Placed early in
+-- the file since both hustles' sections below need it.
+local function buildTierKiosk(folder: Instance, position: Vector3, trackLabel: string, boardColor: Color3)
+	local post = Instance.new("Part")
+	post.Name = trackLabel .. "KioskPost"
+	post.Anchored = true
+	post.CanCollide = false
+	post.Material = Enum.Material.Metal
+	post.Color = Color3.fromRGB(150, 150, 155)
+	post.Size = Vector3.new(0.3, 3, 0.3)
+	post.CFrame = CFrame.new(position)
+	post.Parent = folder
+
+	local board = Instance.new("Part")
+	board.Name = trackLabel .. "KioskBoard"
+	board.Anchored = true
+	board.CanCollide = false
+	board.Material = Enum.Material.SmoothPlastic
+	board.Color = boardColor
+	board.Size = Vector3.new(3, 1.8, 0.2)
+	board.CFrame = post.CFrame * CFrame.new(0, 2.1, 0)
+	board.Parent = folder
+
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Back
+	gui.Parent = board
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Name = "Title"
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Position = UDim2.fromScale(0, 0)
+	titleLabel.Size = UDim2.new(1, 0, 0.32, 0)
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.TextScaled = true
+	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	titleLabel.Text = trackLabel
+	titleLabel.Parent = gui
+
+	local statusLabel = Instance.new("TextLabel")
+	statusLabel.Name = "Status"
+	statusLabel.BackgroundTransparency = 1
+	statusLabel.Position = UDim2.fromScale(0, 0.32)
+	statusLabel.Size = UDim2.new(1, 0, 0.68, 0)
+	statusLabel.Font = Enum.Font.GothamBold
+	statusLabel.TextScaled = true
+	statusLabel.TextColor3 = Theme.Gold
+	statusLabel.TextWrapped = true
+	statusLabel.Parent = gui
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.HoldDuration = 0.5
+	prompt.MaxActivationDistance = 12
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.Parent = board
+
+	return board, statusLabel, prompt
+end
+
+-- Generic tier-list display renderer, shared by both hustles' Value/Speed
+-- kiosks - caller resolves the next tier from its own state/tier-list.
+local function renderTierKioskDisplay(nextTier: { name: string, cost: number }?, statusLabel: TextLabel, prompt: ProximityPrompt)
+	if nextTier then
+		statusLabel.Text = nextTier.name .. "\n$" .. NumberFormatter.Format(nextTier.cost)
+		prompt.ActionText = "Upgrade"
+		prompt.ObjectText = nextTier.name .. " ($" .. NumberFormatter.Format(nextTier.cost) .. ")"
+		prompt.Enabled = true
+	else
+		statusLabel.Text = "MAXED"
+		prompt.Enabled = false
+	end
+end
+
 --------------------------------------------------------------------------------
 -- LIFECYCLE / STAT PLUMBING
 --------------------------------------------------------------------------------
@@ -1196,36 +1270,178 @@ local function applyNeighborhoodUpgradeVisuals(areaModel: Instance, origin: Vect
 	end
 end
 
+--------------------------------------------------------------------------------
+-- DOOR DASH reward/cooldown mechanics (built before the house-building
+-- functions below since they call these)
+--------------------------------------------------------------------------------
+
+-- state.valueTier/speedTier/vehicleTier (0 = none/start) index directly into
+-- their tier arrays (1-based). Reads live every payout so kiosk purchases,
+-- Manager auto-collect, and vehicle tier swaps all apply immediately - same
+-- pattern as Dog Walking's getDogWalkingCooldown/getDogWalkingReward.
+local function getDoorDashCooldown(player: Player): number
+	local state = EconomyService.GetDoorDashState(player)
+	local speedTier = state and Config.DoorDash.speedTiers[state.speedTier]
+	local cooldown = speedTier and speedTier.cooldown or Config.DoorDash.cooldown
+	local vehicleTier = state and Config.DoorDash.vehicleTiers[state.vehicleTier]
+	local cooldownMultiplier = vehicleTier and vehicleTier.cooldownMultiplier or 1
+	return cooldown * cooldownMultiplier
+end
+
+local function getDoorDashRewardRange(player: Player): (number, number)
+	local state = EconomyService.GetDoorDashState(player)
+	local valueTier = state and Config.DoorDash.valueTiers[state.valueTier]
+	local valueMultiplier = valueTier and valueTier.multiplier or 1
+	local vehicleTier = state and Config.DoorDash.vehicleTiers[state.vehicleTier]
+	local vehicleMultiplier = vehicleTier and vehicleTier.valueMultiplier or 1
+	local neighborhoodMultiplier = if EconomyService.GetNeighborhoodTier(player) > 0
+		then Config.Neighborhood.upgradeMultiplier
+		else 1
+	local totalMultiplier = valueMultiplier * vehicleMultiplier * neighborhoodMultiplier
+	return Config.DoorDash.minReward * totalMultiplier, Config.DoorDash.maxReward * totalMultiplier
+end
+
+local function refreshDoorDashHousePrompts(player: Player)
+	local plot = doorDashPlots[player]
+	if not plot then
+		return
+	end
+	local minR, maxR = getDoorDashRewardRange(player)
+	local rangeText = if math.floor(minR) == math.floor(maxR)
+		then "$" .. math.floor(minR)
+		else "$" .. math.floor(minR) .. "-" .. math.floor(maxR)
+	for i, house in ipairs(plot.houses) do
+		local prompt = house:FindFirstChildOfClass("ProximityPrompt")
+		if prompt then
+			prompt.ObjectText = "House " .. i .. " (+" .. rangeText .. ")"
+		end
+	end
+end
+
+function IncomeSourceService.HandleDoorDashDelivery(player: Player, house: BasePart): number?
+	if not checkCooldown(doorDashCooldowns, player, house, getDoorDashCooldown(player)) then
+		return nil
+	end
+	local minR, maxR = getDoorDashRewardRange(player)
+	local reward = math.floor(minR + math.random() * (maxR - minR) + 0.5)
+	payReward(player, house, reward)
+	return reward
+end
+
+local function refreshDoorDashValueKioskDisplay(player: Player, statusLabel: TextLabel, prompt: ProximityPrompt)
+	local state = EconomyService.GetDoorDashState(player)
+	renderTierKioskDisplay(Config.DoorDash.valueTiers[state.valueTier + 1], statusLabel, prompt)
+end
+
+local function refreshDoorDashSpeedKioskDisplay(player: Player, statusLabel: TextLabel, prompt: ProximityPrompt)
+	local state = EconomyService.GetDoorDashState(player)
+	renderTierKioskDisplay(Config.DoorDash.speedTiers[state.speedTier + 1], statusLabel, prompt)
+end
+
+-- Standalone (not just a Triggered closure) so it's directly callable, same
+-- as AttemptDogWalkingValueUpgrade.
+function IncomeSourceService.AttemptDoorDashValueUpgrade(player: Player, board: BasePart, statusLabel: TextLabel, prompt: ProximityPrompt): boolean
+	local state = EconomyService.GetDoorDashState(player)
+	local nextTier = Config.DoorDash.valueTiers[state.valueTier + 1]
+	if not nextTier then
+		return false
+	end
+	if not EconomyService.CanAfford(player, nextTier.cost) then
+		FloatingText.Show(board, "Need $" .. NumberFormatter.Format(nextTier.cost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, nextTier.cost) then
+		return false
+	end
+	EconomyService.UpdateDoorDash(player, { valueTier = state.valueTier + 1 })
+	FloatingText.Show(board, nextTier.name .. "!", Theme.CashPositive)
+	refreshDoorDashValueKioskDisplay(player, statusLabel, prompt)
+	refreshDoorDashHousePrompts(player)
+	return true
+end
+
+function IncomeSourceService.AttemptDoorDashSpeedUpgrade(player: Player, board: BasePart, statusLabel: TextLabel, prompt: ProximityPrompt): boolean
+	local state = EconomyService.GetDoorDashState(player)
+	local nextTier = Config.DoorDash.speedTiers[state.speedTier + 1]
+	if not nextTier then
+		return false
+	end
+	if not EconomyService.CanAfford(player, nextTier.cost) then
+		FloatingText.Show(board, "Need $" .. NumberFormatter.Format(nextTier.cost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, nextTier.cost) then
+		return false
+	end
+	EconomyService.UpdateDoorDash(player, { speedTier = state.speedTier + 1 })
+	FloatingText.Show(board, nextTier.name .. "!", Theme.CashPositive)
+	refreshDoorDashSpeedKioskDisplay(player, statusLabel, prompt)
+	return true
+end
+
+-- Cargo Plane's "+2 houses" go behind the main row (not extending it
+-- sideways) - extending in +X would collide with the ApartmentBuilding the
+-- Neighborhood Upgrade places at startX + houseCount*spacing, and could
+-- approach a neighboring plot's footprint (PLOT_ORIGINS are 80 studs apart
+-- in X). Sits further back in -Z instead, which nothing else occupies.
+local DOOR_DASH_EXTRA_HOUSE_OFFSETS = {
+	Vector3.new(-12, 4, -55),
+	Vector3.new(12, 4, -55),
+}
+
+local function buildHouseAt(player: Player, areaModel: Model, position: Vector3, index: number): BasePart
+	local house = Instance.new("Part")
+	house.Name = "DoorDashHouse_" .. index
+	house.Size = Vector3.new(8, 8, 8)
+	house.Anchored = true
+	house.Position = position
+	house.Color = DOOR_DASH_HOUSE_COLORS[((index - 1) % #DOOR_DASH_HOUSE_COLORS) + 1]
+	house.Material = Enum.Material.Wood
+	house.Parent = areaModel
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Deliver"
+	prompt.ObjectText = "House " .. index
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 10
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.Parent = house
+
+	prompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
+		IncomeSourceService.HandleDoorDashDelivery(player, house)
+	end)
+
+	buildHouseDetails(house, areaModel)
+	return house
+end
+
+-- Adds Cargo Plane's extra houses - called both at purchase time and (on
+-- rejoin) from buildDoorDashNeighborhood if the tier was already owned.
+function IncomeSourceService.AddDoorDashExtraHouses(player: Player, count: number)
+	local plot = doorDashPlots[player]
+	if not plot then
+		return
+	end
+	local areaModel = plot.folder:FindFirstChild("DoorDashArea") :: Model
+	for i = 1, math.min(count, #DOOR_DASH_EXTRA_HOUSE_OFFSETS) do
+		local index = #plot.houses + 1
+		local house = buildHouseAt(player, areaModel, plot.origin + DOOR_DASH_EXTRA_HOUSE_OFFSETS[i], index)
+		if EconomyService.GetNeighborhoodTier(player) > 0 then
+			addHouseUpgradeTrim(house)
+		end
+		table.insert(plot.houses, house)
+	end
+end
+
 local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origin: Vector3)
 	local startX = -((DOOR_DASH_HOUSE_COUNT - 1) * DOOR_DASH_HOUSE_SPACING) / 2
 	local houseParts = {}
 	for i = 1, DOOR_DASH_HOUSE_COUNT do
-		local house = Instance.new("Part")
-		house.Name = "DoorDashHouse_" .. i
-		house.Size = Vector3.new(8, 8, 8)
-		house.Anchored = true
-		house.Position = origin + Vector3.new(startX + (i - 1) * DOOR_DASH_HOUSE_SPACING, 4, -30)
-		house.Color = DOOR_DASH_HOUSE_COLORS[((i - 1) % #DOOR_DASH_HOUSE_COLORS) + 1]
-		house.Material = Enum.Material.Wood
-		house.Parent = areaModel
-
-		local prompt = Instance.new("ProximityPrompt")
-		prompt.ActionText = "Deliver"
-		prompt.ObjectText = "House " .. i
-		prompt.HoldDuration = 0
-		prompt.MaxActivationDistance = 10
-		prompt.KeyboardKeyCode = Enum.KeyCode.E
-		prompt.Parent = house
-
-		prompt.Triggered:Connect(function(triggeredBy)
-			if triggeredBy ~= player then
-				return
-			end
-			IncomeSourceService.HandleDoorDashDelivery(player, house)
-		end)
-
-		buildHouseDetails(house, areaModel)
-		table.insert(houseParts, house)
+		local position = origin + Vector3.new(startX + (i - 1) * DOOR_DASH_HOUSE_SPACING, 4, -30)
+		table.insert(houseParts, buildHouseAt(player, areaModel, position, i))
 	end
 
 	buildDroppedCup(houseParts[2], areaModel)
@@ -1237,6 +1453,32 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 	if EconomyService.GetNeighborhoodTier(player) > 0 then
 		applyNeighborhoodUpgradeVisuals(areaModel, origin)
 	end
+
+	local state = EconomyService.GetDoorDashState(player)
+	local extraCount = state.houseCount - DOOR_DASH_HOUSE_COUNT
+	if extraCount > 0 then
+		IncomeSourceService.AddDoorDashExtraHouses(player, extraCount)
+	end
+
+	local valueBoard, valueStatus, valuePrompt = buildTierKiosk(areaModel, origin + Vector3.new(-15, 0, -24), "Value", Theme.Brand)
+	refreshDoorDashValueKioskDisplay(player, valueStatus, valuePrompt)
+	valuePrompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
+		IncomeSourceService.AttemptDoorDashValueUpgrade(player, valueBoard, valueStatus, valuePrompt)
+	end)
+
+	local speedBoard, speedStatus, speedPrompt = buildTierKiosk(areaModel, origin + Vector3.new(15, 0, -24), "Speed", Theme.Secondary)
+	refreshDoorDashSpeedKioskDisplay(player, speedStatus, speedPrompt)
+	speedPrompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
+		IncomeSourceService.AttemptDoorDashSpeedUpgrade(player, speedBoard, speedStatus, speedPrompt)
+	end)
+
+	refreshDoorDashHousePrompts(player)
 end
 
 -- DoorDash is now a cash-gated unlock inside the shared per-plot
@@ -1395,23 +1637,6 @@ function IncomeSourceService.AddIncomePerSecond(player: Player, delta: number)
 end
 
 --------------------------------------------------------------------------------
--- DOOR DASH
---------------------------------------------------------------------------------
-
-function IncomeSourceService.HandleDoorDashDelivery(player: Player, house: BasePart): number?
-	if not checkCooldown(doorDashCooldowns, player, house, Config.DoorDash.cooldown) then
-		return nil
-	end
-	local base = math.random(Config.DoorDash.minReward, Config.DoorDash.maxReward)
-	local neighborhoodMultiplier = if EconomyService.GetNeighborhoodTier(player) > 0
-		then Config.Neighborhood.upgradeMultiplier
-		else 1
-	local reward = math.floor(base * neighborhoodMultiplier + 0.5)
-	payReward(player, house, reward)
-	return reward
-end
-
---------------------------------------------------------------------------------
 -- RIDESHARE
 --------------------------------------------------------------------------------
 
@@ -1526,88 +1751,17 @@ end
 -- menu - reuses the same single-ProximityPrompt hold-to-confirm purchase
 -- pattern as everything else. Triggering buys whichever tier is next in
 -- that track's list; the sign re-renders to the tier after that, or "MAXED".
-local function buildDogWalkingTierKiosk(folder: Instance, position: Vector3, trackLabel: string, boardColor: Color3)
-	local post = Instance.new("Part")
-	post.Name = trackLabel .. "KioskPost"
-	post.Anchored = true
-	post.CanCollide = false
-	post.Material = Enum.Material.Metal
-	post.Color = Color3.fromRGB(150, 150, 155)
-	post.Size = Vector3.new(0.3, 3, 0.3)
-	post.CFrame = CFrame.new(position)
-	post.Parent = folder
-
-	local board = Instance.new("Part")
-	board.Name = trackLabel .. "KioskBoard"
-	board.Anchored = true
-	board.CanCollide = false
-	board.Material = Enum.Material.SmoothPlastic
-	board.Color = boardColor
-	board.Size = Vector3.new(3, 1.8, 0.2)
-	board.CFrame = post.CFrame * CFrame.new(0, 2.1, 0)
-	board.Parent = folder
-
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Back
-	gui.Parent = board
-
-	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Name = "Title"
-	titleLabel.BackgroundTransparency = 1
-	titleLabel.Position = UDim2.fromScale(0, 0)
-	titleLabel.Size = UDim2.new(1, 0, 0.32, 0)
-	titleLabel.Font = Enum.Font.GothamBold
-	titleLabel.TextScaled = true
-	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	titleLabel.Text = trackLabel
-	titleLabel.Parent = gui
-
-	local statusLabel = Instance.new("TextLabel")
-	statusLabel.Name = "Status"
-	statusLabel.BackgroundTransparency = 1
-	statusLabel.Position = UDim2.fromScale(0, 0.32)
-	statusLabel.Size = UDim2.new(1, 0, 0.68, 0)
-	statusLabel.Font = Enum.Font.GothamBold
-	statusLabel.TextScaled = true
-	statusLabel.TextColor3 = Theme.Gold
-	statusLabel.TextWrapped = true
-	statusLabel.Parent = gui
-
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.HoldDuration = 0.5
-	prompt.MaxActivationDistance = 12
-	prompt.KeyboardKeyCode = Enum.KeyCode.E
-	prompt.Parent = board
-
-	return board, statusLabel, prompt
-end
-
+-- Generic tier-upgrade kiosk builder - one physical sign per track rather
+-- than a multi-button menu, reused by both Dog Walking and DoorDash (and
+-- any future hustle that gets this same Value/Speed pattern).
 local function refreshValueKioskDisplay(player: Player, statusLabel: TextLabel, prompt: ProximityPrompt)
 	local state = EconomyService.GetDogWalkingState(player)
-	local nextTier = Config.DogWalking.valueTiers[state.valueTier + 1]
-	if nextTier then
-		statusLabel.Text = nextTier.name .. "\n$" .. NumberFormatter.Format(nextTier.cost)
-		prompt.ActionText = "Upgrade"
-		prompt.ObjectText = nextTier.name .. " ($" .. NumberFormatter.Format(nextTier.cost) .. ")"
-		prompt.Enabled = true
-	else
-		statusLabel.Text = "MAXED"
-		prompt.Enabled = false
-	end
+	renderTierKioskDisplay(Config.DogWalking.valueTiers[state.valueTier + 1], statusLabel, prompt)
 end
 
 local function refreshSpeedKioskDisplay(player: Player, statusLabel: TextLabel, prompt: ProximityPrompt)
 	local state = EconomyService.GetDogWalkingState(player)
-	local nextTier = Config.DogWalking.speedTiers[state.speedTier + 1]
-	if nextTier then
-		statusLabel.Text = nextTier.name .. "\n$" .. NumberFormatter.Format(nextTier.cost)
-		prompt.ActionText = "Upgrade"
-		prompt.ObjectText = nextTier.name .. " ($" .. NumberFormatter.Format(nextTier.cost) .. ")"
-		prompt.Enabled = true
-	else
-		statusLabel.Text = "MAXED"
-		prompt.Enabled = false
-	end
+	renderTierKioskDisplay(Config.DogWalking.speedTiers[state.speedTier + 1], statusLabel, prompt)
 end
 
 -- Standalone (not just a Triggered closure) so it's directly callable, same
@@ -1785,7 +1939,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 	local prompt = IncomeSourceService.ActivateDogWalking(player, hero)
 	dogWalkingPlots[player] = { folder = folder, origin = origin, hero = hero, prompt = prompt }
 
-	local valueBoard, valueStatus, valuePrompt = buildDogWalkingTierKiosk(folder, base + Vector3.new(-8, 0, 5), "Value", Theme.Brand)
+	local valueBoard, valueStatus, valuePrompt = buildTierKiosk(folder, base + Vector3.new(-8, 0, 5), "Value", Theme.Brand)
 	refreshValueKioskDisplay(player, valueStatus, valuePrompt)
 	valuePrompt.Triggered:Connect(function(triggeredBy)
 		if triggeredBy ~= player then
@@ -1794,7 +1948,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		IncomeSourceService.AttemptDogWalkingValueUpgrade(player, valueBoard, valueStatus, valuePrompt)
 	end)
 
-	local speedBoard, speedStatus, speedPrompt = buildDogWalkingTierKiosk(folder, base + Vector3.new(8, 0, 5), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPrompt = buildTierKiosk(folder, base + Vector3.new(8, 0, 5), "Speed", Theme.Secondary)
 	refreshSpeedKioskDisplay(player, speedStatus, speedPrompt)
 	speedPrompt.Triggered:Connect(function(triggeredBy)
 		if triggeredBy ~= player then
@@ -1803,7 +1957,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		IncomeSourceService.AttemptDogWalkingSpeedUpgrade(player, speedBoard, speedStatus, speedPrompt)
 	end)
 
-	local managerBoard, managerStatus, managerPrompt = buildDogWalkingTierKiosk(folder, base + Vector3.new(0, 0, 5), "Manager", Theme.Gold)
+	local managerBoard, managerStatus, managerPrompt = buildTierKiosk(folder, base + Vector3.new(0, 0, 5), "Manager", Theme.Gold)
 	local dogWalkingState = EconomyService.GetDogWalkingState(player)
 	local post = hero:FindFirstChild("LeashPost") :: BasePart
 	if dogWalkingState.hasManager then
