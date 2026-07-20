@@ -101,10 +101,15 @@ end
 -- LOAD / SAVE
 --------------------------------------------------------------------------------
 
-function EconomyService.LoadPlayer(player: Player)
+-- Returns true if this player has never had a save before (no prior plot
+-- claim, no progress) - PlotService uses this to decide whether they need
+-- to pick a plot in the lobby or can skip straight back into their existing
+-- one.
+function EconomyService.LoadPlayer(player: Player): boolean
 	local ok, saved = withRetry(function()
 		return playerStore:GetAsync("Player_" .. player.UserId)
 	end)
+	local isNewProfile = not (ok and saved)
 
 	profiles[player] = (ok and saved) or defaultProfile()
 	-- Migrates saves from before these progression systems existed.
@@ -149,6 +154,8 @@ function EconomyService.LoadPlayer(player: Player)
 	cashValue.Name = "Cash"
 	cashValue.Value = profiles[player].cash
 	cashValue.Parent = leaderstats
+
+	return isNewProfile
 end
 
 function EconomyService.SavePlayer(player: Player)
