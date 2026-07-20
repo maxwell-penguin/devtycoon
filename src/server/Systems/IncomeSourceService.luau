@@ -115,6 +115,10 @@ local freelanceActive: { [Player]: boolean } = {}
 -- dogWalkingManagerActive[player] = true while the auto-collect loop should keep firing
 local dogWalkingManagerActive: { [Player]: boolean } = {}
 
+-- doorDashManagerActive[player] = true while the auto-collect loops (one per
+-- house) should keep firing
+local doorDashManagerActive: { [Player]: boolean } = {}
+
 local function getStatsFolder(player: Player): Folder?
 	return player:FindFirstChild("PlanetHustleStats")
 end
@@ -231,6 +235,24 @@ local function renderTierKioskDisplay(nextTier: { name: string, cost: number }?,
 		statusLabel.Text = "MAXED"
 		prompt.Enabled = false
 	end
+end
+
+-- Tweens a Model back and forth between two CFrames forever via a
+-- NumberValue-lerp-driven PivotTo — same technique PurchaseEffects.riseHero
+-- uses for Model heroes (Model has no tweenable CFrame property), just with
+-- infinite repeat+reverse instead of a one-shot rise. Cheap cosmetic patrol,
+-- no pathfinding. Shared by both hustles' hired-Manager NPCs.
+local function loopModelBetweenPoints(model: Model, cframeA: CFrame, cframeB: CFrame, duration: number)
+	model:PivotTo(cframeA)
+	local alpha = Instance.new("NumberValue")
+	alpha.Value = 0
+	alpha.Parent = model
+	alpha:GetPropertyChangedSignal("Value"):Connect(function()
+		if model.Parent then
+			model:PivotTo(cframeA:Lerp(cframeB, alpha.Value))
+		end
+	end)
+	TweenService:Create(alpha, TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { Value = 1 }):Play()
 end
 
 --------------------------------------------------------------------------------
@@ -1379,6 +1401,121 @@ function IncomeSourceService.AttemptDoorDashSpeedUpgrade(player: Player, board: 
 	return true
 end
 
+-- The "Dispatcher" hired NPC: a primitive delivery-person figure carrying a
+-- package, patrolling a back-and-forth loop along the house row so
+-- automation feels alive without any pathfinding.
+local function buildDispatcherNpc(folder: Instance, origin: Vector3): Model
+	local npc = Instance.new("Model")
+	npc.Name = "DispatcherNpc"
+	npc.Parent = folder
+
+	local startPos = origin + Vector3.new(-30, 3, -27)
+
+	local torso = Instance.new("Part")
+	torso.Name = "Torso"
+	torso.Anchored = true
+	torso.CanCollide = false
+	torso.Material = Enum.Material.SmoothPlastic
+	torso.Color = Theme.Brand
+	torso.Size = Vector3.new(1.4, 2, 0.8)
+	torso.CFrame = CFrame.new(startPos)
+	torso.Parent = npc
+	npc.PrimaryPart = torso
+
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Shape = Enum.PartType.Ball
+	head.Anchored = true
+	head.CanCollide = false
+	head.Material = Enum.Material.SmoothPlastic
+	head.Color = Color3.fromRGB(255, 213, 170)
+	head.Size = Vector3.new(1, 1, 1)
+	head.CFrame = torso.CFrame * CFrame.new(0, 1.5, 0)
+	head.Parent = npc
+
+	for _, side in ipairs({ -1, 1 }) do
+		local leg = Instance.new("Part")
+		leg.Name = "Leg"
+		leg.Anchored = true
+		leg.CanCollide = false
+		leg.Material = Enum.Material.SmoothPlastic
+		leg.Color = Color3.fromRGB(40, 40, 45)
+		leg.Size = Vector3.new(0.5, 1.6, 0.6)
+		leg.CFrame = torso.CFrame * CFrame.new(side * 0.35, -1.8, 0)
+		leg.Parent = npc
+	end
+
+	local package = Instance.new("Part")
+	package.Name = "Package"
+	package.Anchored = true
+	package.CanCollide = false
+	package.Material = Enum.Material.SmoothPlastic
+	package.Color = Color3.fromRGB(200, 160, 110)
+	package.Size = Vector3.new(0.8, 0.8, 0.8)
+	package.CFrame = torso.CFrame * CFrame.new(0.9, -0.3, 0)
+	package.Parent = npc
+
+	local pointA = torso.CFrame
+	local pointB = torso.CFrame * CFrame.new(60, 0, 0)
+	loopModelBetweenPoints(npc, pointA, pointB, 8)
+
+	return npc
+end
+
+-- Auto-collect: one loop PER HOUSE (unlike Dog Walking's single station),
+-- each firing HandleDoorDashDelivery on its own independent cooldown timer -
+-- matches "each owned house pays out automatically" from the original spec.
+-- Manual E-presses route through the same function and share the same
+-- cooldown table, so whichever fires first just resets that house's timer.
+function IncomeSourceService.StartDoorDashManagerLoops(player: Player)
+	local plot = doorDashPlots[player]
+	if not plot or doorDashManagerActive[player] then
+		return
+	end
+	doorDashManagerActive[player] = true
+	for _, house in ipairs(plot.houses) do
+		task.spawn(function()
+			while doorDashManagerActive[player] and player.Parent and house.Parent do
+				task.wait(getDoorDashCooldown(player))
+				if not (doorDashManagerActive[player] and player.Parent and house.Parent) then
+					break
+				end
+				IncomeSourceService.HandleDoorDashDelivery(player, house)
+			end
+		end)
+	end
+end
+
+function IncomeSourceService.AttemptDoorDashManagerHire(
+	player: Player,
+	folder: Instance,
+	origin: Vector3,
+	board: BasePart,
+	statusLabel: TextLabel,
+	prompt: ProximityPrompt
+): boolean
+	local state = EconomyService.GetDoorDashState(player)
+	if state.hasManager then
+		return false
+	end
+	if not EconomyService.CanAfford(player, Config.DoorDash.managerCost) then
+		FloatingText.Show(board, "Need $" .. NumberFormatter.Format(Config.DoorDash.managerCost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, Config.DoorDash.managerCost) then
+		return false
+	end
+	EconomyService.UpdateDoorDash(player, { hasManager = true })
+
+	statusLabel.Text = "HIRED"
+	prompt.Enabled = false
+	FloatingText.Show(board, "Dispatcher Hired!", Theme.CashPositive)
+
+	buildDispatcherNpc(folder, origin)
+	IncomeSourceService.StartDoorDashManagerLoops(player)
+	return true
+end
+
 -- Cargo Plane's "+2 houses" go behind the main row (not extending it
 -- sideways) - extending in +X would collide with the ApartmentBuilding the
 -- Neighborhood Upgrade places at startX + houseCount*spacing, and could
@@ -1476,6 +1613,24 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 			return
 		end
 		IncomeSourceService.AttemptDoorDashSpeedUpgrade(player, speedBoard, speedStatus, speedPrompt)
+	end)
+
+	local managerBoard, managerStatus, managerPrompt = buildTierKiosk(areaModel, origin + Vector3.new(0, 0, -24), "Manager", Theme.Gold)
+	if state.hasManager then
+		managerStatus.Text = "HIRED"
+		managerPrompt.Enabled = false
+		buildDispatcherNpc(areaModel, origin)
+		IncomeSourceService.StartDoorDashManagerLoops(player)
+	else
+		managerStatus.Text = "Hire a Dispatcher\n$" .. NumberFormatter.Format(Config.DoorDash.managerCost)
+		managerPrompt.ActionText = "Hire"
+		managerPrompt.ObjectText = "Hire a Dispatcher ($" .. NumberFormatter.Format(Config.DoorDash.managerCost) .. ")"
+	end
+	managerPrompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
+		IncomeSourceService.AttemptDoorDashManagerHire(player, areaModel, origin, managerBoard, managerStatus, managerPrompt)
 	end)
 
 	refreshDoorDashHousePrompts(player)
@@ -1600,6 +1755,7 @@ end
 
 function IncomeSourceService.CleanupPlayerDoorDash(player: Player)
 	doorDashCooldowns[player] = nil
+	doorDashManagerActive[player] = nil
 	doorDashPlots[player] = nil
 end
 
@@ -1803,24 +1959,6 @@ function IncomeSourceService.AttemptDogWalkingSpeedUpgrade(player: Player, board
 	FloatingText.Show(board, nextTier.name .. "!", Theme.CashPositive)
 	refreshSpeedKioskDisplay(player, statusLabel, prompt)
 	return true
-end
-
--- Tweens a Model back and forth between two CFrames forever via a
--- NumberValue-lerp-driven PivotTo — same technique PurchaseEffects.riseHero
--- uses for Model heroes (Model has no tweenable CFrame property), just with
--- infinite repeat+reverse instead of a one-shot rise. Cheap cosmetic patrol,
--- no pathfinding.
-local function loopModelBetweenPoints(model: Model, cframeA: CFrame, cframeB: CFrame, duration: number)
-	model:PivotTo(cframeA)
-	local alpha = Instance.new("NumberValue")
-	alpha.Value = 0
-	alpha.Parent = model
-	alpha:GetPropertyChangedSignal("Value"):Connect(function()
-		if model.Parent then
-			model:PivotTo(cframeA:Lerp(cframeB, alpha.Value))
-		end
-	end)
-	TweenService:Create(alpha, TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { Value = 1 }):Play()
 end
 
 -- The "Dog Walker" hired NPC: a primitive blocky figure with a 4th leashed
