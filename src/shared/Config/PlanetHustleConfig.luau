@@ -95,7 +95,11 @@ PlanetHustleConfig.DogWalking = {
 	-- Now the always-free starter (swapped roles with DoorDash) - no
 	-- unlockCost, available the moment a player's plot exists.
 	rewardPerLoop = 15,
-	cooldown = 10, -- seconds, tier 0 (no Speed upgrade)
+	-- Deliberately snappy base for the on-screen Walk button - a 10s
+	-- cooldown felt slow on the click UX and left no headroom above
+	-- Comfortable Shoes' old 6s. Every tier below strictly reduces from
+	-- this base.
+	cooldown = 2,
 
 	-- Value track. Each tier REPLACES the previous (not stacked) - tier N's
 	-- multiplier applies directly to rewardPerLoop.
@@ -106,10 +110,12 @@ PlanetHustleConfig.DogWalking = {
 	},
 
 	-- Speed track. Each tier replaces the previous cooldown (seconds).
+	-- Rebalanced from {6, 3, 1.5} once the base dropped to 2 - the old
+	-- tier 1 would have been an anti-upgrade.
 	speedTiers = {
-		{ name = "Comfortable Shoes", cost = 30, cooldown = 6 },
-		{ name = "Golf Cart", cost = 200, cooldown = 3 },
-		{ name = "E-Bike Delivery Route", cost = 800, cooldown = 1.5 },
+		{ name = "Comfortable Shoes", cost = 30, cooldown = 1.5 },
+		{ name = "Golf Cart", cost = 200, cooldown = 1 },
+		{ name = "E-Bike Delivery Route", cost = 800, cooldown = 0.5 },
 	},
 
 	-- "Hire a Dog Walker" - one-time purchase, flips Dog Walking from
