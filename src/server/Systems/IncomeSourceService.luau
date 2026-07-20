@@ -26,6 +26,20 @@ local FLASH_COLOR = Theme.CashPositive
 -- no separate stack prop needed on top of it.
 local DOOR_DASH_MOPED_ASSET_ID = 74198464525165
 
+-- Vehicle tier escalation (Phase 4) hero assets, each replacing the moped
+-- as DoorDash's "hero" prop. Screenshot-verified in Studio before wiring
+-- in: a plain white box-truck (blank cargo panel, easy to re-skin later),
+-- a quadcopter carrying a package, a plain blocky blue helicopter (first
+-- helicopter candidate found had a cartoonish face - swapped for this one
+-- since it read as too big a tonal swing next to the other 3 vehicles),
+-- and a simple white 4-engine cargo plane. All 4 are oversized as authored
+-- and get Model:ScaleTo() down to fit our prop scale, same technique as
+-- the Dog Walking beagle.
+local DOOR_DASH_VAN_ASSET_ID = 117216307672484
+local DOOR_DASH_DRONE_ASSET_ID = 376960362
+local DOOR_DASH_HELICOPTER_ASSET_ID = 12236677
+local DOOR_DASH_CARGO_PLANE_ASSET_ID = 15335647
+
 local DOOR_DASH_HOUSE_COLORS = {
 	Color3.fromRGB(235, 149, 50), -- warm orange
 	Color3.fromRGB(90, 170, 220), -- sky blue
@@ -1467,6 +1481,18 @@ end
 -- matches "each owned house pays out automatically" from the original spec.
 -- Manual E-presses route through the same function and share the same
 -- cooldown table, so whichever fires first just resets that house's timer.
+local function startDoorDashHouseLoop(player: Player, house: BasePart)
+	task.spawn(function()
+		while doorDashManagerActive[player] and player.Parent and house.Parent do
+			task.wait(getDoorDashCooldown(player))
+			if not (doorDashManagerActive[player] and player.Parent and house.Parent) then
+				break
+			end
+			IncomeSourceService.HandleDoorDashDelivery(player, house)
+		end
+	end)
+end
+
 function IncomeSourceService.StartDoorDashManagerLoops(player: Player)
 	local plot = doorDashPlots[player]
 	if not plot or doorDashManagerActive[player] then
@@ -1474,15 +1500,7 @@ function IncomeSourceService.StartDoorDashManagerLoops(player: Player)
 	end
 	doorDashManagerActive[player] = true
 	for _, house in ipairs(plot.houses) do
-		task.spawn(function()
-			while doorDashManagerActive[player] and player.Parent and house.Parent do
-				task.wait(getDoorDashCooldown(player))
-				if not (doorDashManagerActive[player] and player.Parent and house.Parent) then
-					break
-				end
-				IncomeSourceService.HandleDoorDashDelivery(player, house)
-			end
-		end)
+		startDoorDashHouseLoop(player, house)
 	end
 end
 
@@ -1570,10 +1588,148 @@ function IncomeSourceService.AddDoorDashExtraHouses(player: Player, count: numbe
 			addHouseUpgradeTrim(house)
 		end
 		table.insert(plot.houses, house)
+		-- Cargo Plane can be bought after the Dispatcher is already hired -
+		-- give the new house its own auto-collect loop immediately rather
+		-- than waiting for a rejoin.
+		if doorDashManagerActive[player] then
+			startDoorDashHouseLoop(player, house)
+		end
 	end
 end
 
-local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origin: Vector3)
+-- Vehicle tier escalation (Phase 4): each tier REPLACES DoorDash's hero prop
+-- (moped -> van -> drone -> helicopter -> cargo plane). Finds whichever
+-- vehicle is currently there under either name - "MopedHero" (built at
+-- unlock, before any vehicle tier is bought) or "VehicleHero" (every tier
+-- after that) - so the swap works regardless of which one is live.
+local function findCurrentDoorDashVehicle(areaModel: Instance): Model?
+	return (areaModel:FindFirstChild("VehicleHero") :: Model?) or (areaModel:FindFirstChild("MopedHero") :: Model?)
+end
+
+local DOOR_DASH_VEHICLE_ASSET_IDS = {
+	[1] = DOOR_DASH_VAN_ASSET_ID,
+	[2] = DOOR_DASH_DRONE_ASSET_ID,
+	[3] = DOOR_DASH_HELICOPTER_ASSET_ID,
+	[4] = DOOR_DASH_CARGO_PLANE_ASSET_ID,
+}
+-- Target height (studs) each vehicle gets scaled to - keeps the escalation
+-- readable at our prop scale (houses are 8 studs tall) without each tier
+-- being wildly bigger than the last.
+local DOOR_DASH_VEHICLE_TARGET_HEIGHTS = { [1] = 6, [2] = 3, [3] = 6, [4] = 8 }
+-- Drone/Helicopter hover above the ground instead of sitting on it.
+local DOOR_DASH_VEHICLE_HOVER_HEIGHTS = { [2] = 6, [3] = 7 }
+
+local function buildDoorDashVehicleHero(areaModel: Instance, origin: Vector3, vehicleTier: number): Model?
+	local old = findCurrentDoorDashVehicle(areaModel)
+	if old then
+		old:Destroy()
+	end
+
+	local assetId = DOOR_DASH_VEHICLE_ASSET_IDS[vehicleTier]
+	if not assetId then
+		return nil
+	end
+
+	local ok, container = pcall(function()
+		return InsertService:LoadAsset(assetId)
+	end)
+	local vehicle = ok and container and container:FindFirstChildOfClass("Model")
+	if container then
+		if vehicle then
+			vehicle.Parent = nil
+		end
+		container:Destroy()
+	end
+	if not vehicle then
+		warn("[IncomeSourceService] Failed to load DoorDash vehicle tier " .. vehicleTier .. " asset")
+		return nil
+	end
+
+	vehicle.Name = "VehicleHero"
+
+	-- Some Toolbox vehicle listings (the Delivery Van in particular) are
+	-- full drivable-car kits with embedded chassis Scripts, seats, and
+	-- sounds - strip all of that BEFORE parenting into the live game so
+	-- those scripts never get a chance to start. This is meant to be an
+	-- inert decorative hero prop, not a functional vehicle.
+	for _, descendant in ipairs(vehicle:GetDescendants()) do
+		if descendant:IsA("Script") or descendant:IsA("LocalScript") or descendant:IsA("Seat") or descendant:IsA("VehicleSeat") or descendant:IsA("Sound") then
+			descendant:Destroy()
+		end
+	end
+
+	vehicle.Parent = areaModel
+	for _, part in ipairs(vehicle:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+		end
+	end
+
+	local _, sizeBeforeScale = vehicle:GetBoundingBox()
+	local targetHeight = DOOR_DASH_VEHICLE_TARGET_HEIGHTS[vehicleTier] or 6
+	vehicle:ScaleTo(targetHeight / sizeBeforeScale.Y)
+
+	local hoverHeight = DOOR_DASH_VEHICLE_HOVER_HEIGHTS[vehicleTier]
+	local _, finalSize = vehicle:GetBoundingBox()
+	local groundY = hoverHeight or (finalSize.Y / 2)
+	recenterModel(vehicle, CFrame.new(origin + Vector3.new(0, groundY, -22)))
+
+	return vehicle
+end
+
+local function refreshDoorDashVehicleKioskDisplay(player: Player, statusLabel: TextLabel, prompt: ProximityPrompt)
+	local state = EconomyService.GetDoorDashState(player)
+	renderTierKioskDisplay(Config.DoorDash.vehicleTiers[state.vehicleTier + 1], statusLabel, prompt)
+end
+
+-- Standalone (not just a Triggered closure) so it's directly callable, same
+-- as the Value/Speed/Manager Attempt* functions.
+function IncomeSourceService.AttemptDoorDashVehicleUpgrade(
+	player: Player,
+	areaModel: Model,
+	origin: Vector3,
+	vehicleFloor: BasePart,
+	board: BasePart,
+	statusLabel: TextLabel,
+	prompt: ProximityPrompt
+): boolean
+	local state = EconomyService.GetDoorDashState(player)
+	local nextTier = Config.DoorDash.vehicleTiers[state.vehicleTier + 1]
+	if not nextTier then
+		return false
+	end
+	if not EconomyService.CanAfford(player, nextTier.cost) then
+		FloatingText.Show(board, "Need $" .. NumberFormatter.Format(nextTier.cost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, nextTier.cost) then
+		return false
+	end
+	local newVehicleTier = state.vehicleTier + 1
+	EconomyService.UpdateDoorDash(player, { vehicleTier = newVehicleTier })
+
+	if nextTier.extraHouses then
+		IncomeSourceService.AddDoorDashExtraHouses(player, nextTier.extraHouses)
+	end
+
+	local vehicle = buildDoorDashVehicleHero(areaModel, origin, newVehicleTier)
+	refreshDoorDashVehicleKioskDisplay(player, statusLabel, prompt)
+	refreshDoorDashHousePrompts(player)
+
+	PurchaseEffects.ApplyOwnedVisuals({
+		zoneModel = areaModel,
+		floor = vehicleFloor,
+		hero = (vehicle :: Model) or vehicleFloor,
+		ownedColor = Theme.CashPositive,
+		animate = true,
+		buyer = player,
+		resultText = nextTier.name .. " UNLOCKED!",
+		resultColor = Theme.Gold,
+	})
+	return true
+end
+
+local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origin: Vector3, vehicleFloor: BasePart)
 	local startX = -((DOOR_DASH_HOUSE_COUNT - 1) * DOOR_DASH_HOUSE_SPACING) / 2
 	local houseParts = {}
 	for i = 1, DOOR_DASH_HOUSE_COUNT do
@@ -1597,7 +1753,13 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		IncomeSourceService.AddDoorDashExtraHouses(player, extraCount)
 	end
 
-	local valueBoard, valueStatus, valuePrompt = buildTierKiosk(areaModel, origin + Vector3.new(-15, 0, -24), "Value", Theme.Brand)
+	-- Rejoin with a vehicle tier already bought: replace the moped that was
+	-- just built above with whichever vehicle the player currently owns.
+	if state.vehicleTier > 0 then
+		buildDoorDashVehicleHero(areaModel, origin, state.vehicleTier)
+	end
+
+	local valueBoard, valueStatus, valuePrompt = buildTierKiosk(areaModel, origin + Vector3.new(-24, 0, -24), "Value", Theme.Brand)
 	refreshDoorDashValueKioskDisplay(player, valueStatus, valuePrompt)
 	valuePrompt.Triggered:Connect(function(triggeredBy)
 		if triggeredBy ~= player then
@@ -1606,7 +1768,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		IncomeSourceService.AttemptDoorDashValueUpgrade(player, valueBoard, valueStatus, valuePrompt)
 	end)
 
-	local speedBoard, speedStatus, speedPrompt = buildTierKiosk(areaModel, origin + Vector3.new(15, 0, -24), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPrompt = buildTierKiosk(areaModel, origin + Vector3.new(24, 0, -24), "Speed", Theme.Secondary)
 	refreshDoorDashSpeedKioskDisplay(player, speedStatus, speedPrompt)
 	speedPrompt.Triggered:Connect(function(triggeredBy)
 		if triggeredBy ~= player then
@@ -1615,7 +1777,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		IncomeSourceService.AttemptDoorDashSpeedUpgrade(player, speedBoard, speedStatus, speedPrompt)
 	end)
 
-	local managerBoard, managerStatus, managerPrompt = buildTierKiosk(areaModel, origin + Vector3.new(0, 0, -24), "Manager", Theme.Gold)
+	local managerBoard, managerStatus, managerPrompt = buildTierKiosk(areaModel, origin + Vector3.new(-8, 0, -24), "Manager", Theme.Gold)
 	if state.hasManager then
 		managerStatus.Text = "HIRED"
 		managerPrompt.Enabled = false
@@ -1633,6 +1795,15 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		IncomeSourceService.AttemptDoorDashManagerHire(player, areaModel, origin, managerBoard, managerStatus, managerPrompt)
 	end)
 
+	local vehicleBoard, vehicleStatus, vehiclePrompt = buildTierKiosk(areaModel, origin + Vector3.new(8, 0, -24), "Vehicle", Theme.AffordablePulse)
+	refreshDoorDashVehicleKioskDisplay(player, vehicleStatus, vehiclePrompt)
+	vehiclePrompt.Triggered:Connect(function(triggeredBy)
+		if triggeredBy ~= player then
+			return
+		end
+		IncomeSourceService.AttemptDoorDashVehicleUpgrade(player, areaModel, origin, vehicleFloor, vehicleBoard, vehicleStatus, vehiclePrompt)
+	end)
+
 	refreshDoorDashHousePrompts(player)
 end
 
@@ -1646,21 +1817,28 @@ function IncomeSourceService.SetupPlayerDoorDash(player: Player, folder: Folder,
 	areaModel.Name = "DoorDashArea"
 	areaModel.Parent = folder
 
-	if EconomyService.IsZoneOwned(player, "doordash") then
-		buildDoorDashNeighborhood(player, areaModel, origin)
-		return
-	end
-
+	-- This floor is always built (owned or not) - once unlocked it becomes
+	-- the permanent "vehicle bay" pad the Phase 4 vehicle tier upgrades
+	-- reveal their new hero against, reusing the same money-shot floor
+	-- rather than building a separate one per vehicle tier.
 	local unlockFloor = Instance.new("Part")
 	unlockFloor.Name = "Floor"
 	unlockFloor.Anchored = true
 	unlockFloor.CanCollide = false
 	unlockFloor.Size = Vector3.new(10, 1, 10)
 	unlockFloor.Position = origin + Vector3.new(0, 0.5, -18)
-	unlockFloor.Color = Theme.Locked
 	unlockFloor.Material = Enum.Material.Neon
-	unlockFloor.Transparency = 0.5
 	unlockFloor.Parent = areaModel
+
+	if EconomyService.IsZoneOwned(player, "doordash") then
+		unlockFloor.Color = Theme.CashPositive
+		unlockFloor.Transparency = 0
+		buildDoorDashNeighborhood(player, areaModel, origin, unlockFloor)
+		return
+	end
+
+	unlockFloor.Color = Theme.Locked
+	unlockFloor.Transparency = 0.5
 
 	local priceGui = Instance.new("BillboardGui")
 	priceGui.Name = "PriceTag"
@@ -1737,7 +1915,7 @@ function IncomeSourceService.AttemptDoorDashUnlock(
 
 	priceGui:Destroy()
 	prompt.Enabled = false
-	buildDoorDashNeighborhood(player, areaModel, origin)
+	buildDoorDashNeighborhood(player, areaModel, origin, unlockFloor)
 
 	local moped = areaModel:FindFirstChild("MopedHero")
 	PurchaseEffects.ApplyOwnedVisuals({
