@@ -2,32 +2,119 @@
 local PlanetHustleConfig = {}
 
 PlanetHustleConfig.DoorDash = {
+	-- No longer the always-free starter (Dog Walking took that role) - a
+	-- cheap one-time unlock inside the shared per-plot neighborhood instead.
+	unlockCost = 100,
+
 	minReward = 1,
 	maxReward = 3,
-	cooldown = 3, -- seconds per house
+	cooldown = 3, -- seconds per house, tier 0 (no Speed upgrade)
+	startingHouseCount = 4,
+	maxHouseCount = 8,
+
+	-- Phase 2: Value track. Cash-gated, no Manager required. Each tier
+	-- REPLACES the previous one (not stacked) - tier N's multiplier applies
+	-- directly to the base min/maxReward roll.
+	valueTiers = {
+		{ name = "Insulated Bags", cost = 50, multiplier = 1.5 },
+		{ name = "Premium Packaging", cost = 250, multiplier = 2 },
+		{ name = "Priority Orders", cost = 1000, multiplier = 3 },
+	},
+
+	-- Phase 2: Speed track. Cash-gated. Each tier replaces the previous
+	-- per-house cooldown (seconds). Deliberately gentler than Dog Walking's
+	-- floor (1.5s vs 1.5s... but DoorDash has 4-6 SIMULTANEOUS houses once
+	-- Manager is hired, so its aggregate $/s multiplies by house count - a
+	-- 0.5s floor here (an earlier dormant draft's number) would have blown
+	-- way past the target ceiling once combined with Vehicle tiers below.
+	speedTiers = {
+		{ name = "Tuned Engine", cost = 75, cooldown = 2.5 },
+		{ name = "Bigger Fuel Tank", cost = 300, cooldown = 2 },
+		{ name = "Racing Slicks", cost = 1200, cooldown = 1.5 },
+	},
+
+	-- Phase 3: "Hire a Dispatcher" - one-time purchase, flips DoorDash from
+	-- manual-only to auto-triggering (manual E-press still works, just
+	-- resets that house's own timer rather than stacking).
+	managerCost = 4000,
+
+	-- Phase 4: Vehicle tier escalation - DoorDash's OWN scale identity,
+	-- distinct from Dog Walking's neighborhood-growth scale. Each tier
+	-- REPLACES the previous (not stacked): valueMultiplier stacks
+	-- multiplicatively with the Value track, cooldownMultiplier applies to
+	-- whatever the Speed track achieved. Deliberately modest per-tier bumps -
+	-- Cargo Plane's headline feature is +2 houses (extraHouses), not a huge
+	-- number, since 4-6 simultaneous houses already does most of the
+	-- heavy lifting on the aggregate $/s ceiling.
+	-- Full-investment math: 2(avgBase) * 3(Value) * 1.33(CargoPlane) *
+	-- 2(Neighborhood) / (1.5s * 0.8) * 6 houses ≈ $80/s - ~1.33x Dog
+	-- Walking's $60/s ceiling, ~1.6x Freelance's $50/s, both within the
+	-- requested 1.2-1.8x band.
+	vehicleTiers = {
+		{ name = "Delivery Van", cost = 5000, valueMultiplier = 1.1, cooldownMultiplier = 0.95 },
+		{ name = "Drone Fleet", cost = 12000, valueMultiplier = 1.18, cooldownMultiplier = 0.9 },
+		{ name = "Helicopter", cost = 30000, valueMultiplier = 1.25, cooldownMultiplier = 0.85 },
+		{ name = "Cargo Plane", cost = 75000, valueMultiplier = 1.33, cooldownMultiplier = 0.8, extraHouses = 2 },
+	},
 }
 
 PlanetHustleConfig.Rideshare = {
 	unlockCost = 150,
 	rewardPerLoop = 5,
+	cooldown = 5,
 }
 
 PlanetHustleConfig.Lottery = {
 	unlockCost = 500,
 	ticketPrice = 20,
-	-- Weighted outcomes, must sum to 1. payoutMultiplier is applied to ticketPrice.
-	-- For smallLoss, payoutMultiplier is rolled between min/max at resolve time.
+	cooldown = 3, -- seconds between pulls per player per booth
+	-- Weighted outcomes, weights sum to 1. Multiplier rolled uniformly in
+	-- [minMultiplier, maxMultiplier] once outcome is picked. Theoretical
+	-- expected multiplier ≈ 0.9475 (~5% house edge on the $20 ticket).
 	outcomes = {
-		{ name = "smallLoss", weight = 0.60, minMultiplier = 0, maxMultiplier = 0.5 },
-		{ name = "modestWin", weight = 0.30, minMultiplier = 2, maxMultiplier = 3 },
-		{ name = "bigWin", weight = 0.09, minMultiplier = 5, maxMultiplier = 10 },
-		{ name = "jackpot", weight = 0.01, minMultiplier = 50, maxMultiplier = 100 },
+		{ name = "smallLoss", weight = 0.75, minMultiplier = 0, maxMultiplier = 0.4 },
+		{ name = "modestWin", weight = 0.20, minMultiplier = 1.5, maxMultiplier = 2.5 },
+		{ name = "bigWin", weight = 0.045, minMultiplier = 4, maxMultiplier = 7 },
+		{ name = "jackpot", weight = 0.005, minMultiplier = 20, maxMultiplier = 40 },
 	},
 }
 
 PlanetHustleConfig.DogWalking = {
-	unlockCost = 800,
+	-- Now the always-free starter (swapped roles with DoorDash) - no
+	-- unlockCost, available the moment a player's plot exists.
 	rewardPerLoop = 15,
+	cooldown = 10, -- seconds, tier 0 (no Speed upgrade)
+
+	-- Value track. Each tier REPLACES the previous (not stacked) - tier N's
+	-- multiplier applies directly to rewardPerLoop.
+	valueTiers = {
+		{ name = "Better Leashes", cost = 20, multiplier = 1.5 },
+		{ name = "Treats & Toys", cost = 150, multiplier = 2 },
+		{ name = "Premium Grooming Add-on", cost = 600, multiplier = 3 },
+	},
+
+	-- Speed track. Each tier replaces the previous cooldown (seconds).
+	speedTiers = {
+		{ name = "Comfortable Shoes", cost = 30, cooldown = 6 },
+		{ name = "Golf Cart", cost = 200, cooldown = 3 },
+		{ name = "E-Bike Delivery Route", cost = 800, cooldown = 1.5 },
+	},
+
+	-- "Hire a Dog Walker" - one-time purchase, flips Dog Walking from
+	-- manual-only to auto-triggering (manual E-press still works, just
+	-- resets the station's own timer rather than stacking).
+	managerCost = 2000,
+}
+
+-- Neighborhood Upgrade: the one Scale tier this pass builds (DoorDash's own
+-- Office Building tier is a separate future pass). One shared purchase that
+-- multiplies the BASE reward for BOTH Dog Walking and DoorDash, since they
+-- share one neighborhood plot - lives at the top level rather than nested
+-- under either hustle's config. At max Dog Walking Value+Speed+this:
+-- 15 * 3 * 2 / 1.5 = $60/s, ~1.2x Freelance Gig Hub's $50/s passive ceiling.
+PlanetHustleConfig.Neighborhood = {
+	upgradeCost = 10000,
+	upgradeMultiplier = 2,
 }
 
 PlanetHustleConfig.FreelanceGigHub = {
