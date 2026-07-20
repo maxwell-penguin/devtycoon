@@ -1432,10 +1432,11 @@ local function buildDispatcherNpc(folder: Instance, origin: Vector3): Model
 	npc.Name = "DispatcherNpc"
 	npc.Parent = folder
 
-	-- East outer sidewalk (X=+33, just outside the loop's east road). Yaw
-	-- +90° so local +X = world +Z: the patrol below walks along the
-	-- sidewalk and the torso "faces" -X (into the park).
-	local startCFrame = CFrame.new(origin + Vector3.new(33, 3, -25)) * CFrame.Angles(0, math.rad(90), 0)
+	-- East road (X=+22, on the road near its house-side edge). Yaw +90° so
+	-- local +X = world +Z: the patrol below walks along the road and the
+	-- torso "faces" -X (into the park). Kept off the inner sidewalk (X=+16)
+	-- since the DoorDash kiosks live there.
+	local startCFrame = CFrame.new(origin + Vector3.new(22, 3, -25)) * CFrame.Angles(0, math.rad(90), 0)
 
 	local torso = Instance.new("Part")
 	torso.Name = "Torso"
@@ -1948,7 +1949,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 	-- points -X (toward the park center), matching the direction the houses
 	-- and the player approach them from.
 	local eastKioskYaw = math.rad(90)
-	local valueBoard, valueStatus, valuePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(22, 0, -18)) * CFrame.Angles(0, eastKioskYaw, 0), "Value", Theme.Brand)
+	local valueBoard, valueStatus, valuePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, -18)) * CFrame.Angles(0, eastKioskYaw, 0), "Value", Theme.Brand)
 	refreshDoorDashValueKioskDisplay(player, valueStatus, valuePad)
 	PurchasePad.Wire(valuePad, function(p)
 		return p == player
@@ -1956,7 +1957,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		return IncomeSourceService.AttemptDoorDashValueUpgrade(p, valueBoard, valueStatus, valuePad)
 	end, false)
 
-	local speedBoard, speedStatus, speedPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(22, 0, 18)) * CFrame.Angles(0, eastKioskYaw, 0), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, 18)) * CFrame.Angles(0, eastKioskYaw, 0), "Speed", Theme.Secondary)
 	refreshDoorDashSpeedKioskDisplay(player, speedStatus, speedPad)
 	PurchasePad.Wire(speedPad, function(p)
 		return p == player
@@ -1964,7 +1965,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		return IncomeSourceService.AttemptDoorDashSpeedUpgrade(p, speedBoard, speedStatus, speedPad)
 	end, false)
 
-	local managerBoard, managerStatus, managerPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(22, 0, -8)) * CFrame.Angles(0, eastKioskYaw, 0), "Manager", Theme.Gold)
+	local managerBoard, managerStatus, managerPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, -8)) * CFrame.Angles(0, eastKioskYaw, 0), "Manager", Theme.Gold)
 	if state.hasManager then
 		managerStatus.Text = "HIRED"
 		managerPad.Transparency = 0.7
@@ -1979,7 +1980,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		end, true)
 	end
 
-	local vehicleBoard, vehicleStatus, vehiclePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(22, 0, 8)) * CFrame.Angles(0, eastKioskYaw, 0), "Vehicle", Theme.AffordablePulse)
+	local vehicleBoard, vehicleStatus, vehiclePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, 8)) * CFrame.Angles(0, eastKioskYaw, 0), "Vehicle", Theme.AffordablePulse)
 	refreshDoorDashVehicleKioskDisplay(player, vehicleStatus, vehiclePad)
 	PurchasePad.Wire(vehiclePad, function(p)
 		return p == player
@@ -2394,10 +2395,11 @@ local function buildDogWalkerNpc(folder: Instance, origin: Vector3): Model
 	npc.Name = "DogWalkerNpc"
 	npc.Parent = folder
 
-	-- West outer sidewalk (X=-33, just outside the loop's west road). Yaw
-	-- -90° so local +Z = world +X: the torso "faces" +X (into the park) and
-	-- the patrol below runs along the sidewalk in world Z.
-	local startCFrame = CFrame.new(origin + Vector3.new(-33, 3, -12)) * CFrame.Angles(0, math.rad(-90), 0)
+	-- West road (X=-22, on the road near its station-side edge). Yaw -90° so
+	-- local +Z = world +X: the torso "faces" +X (into the park) and the
+	-- patrol below runs along the road in world Z. Kept off the inner
+	-- sidewalk (X=-16) since the Dog Walking kiosks live there.
+	local startCFrame = CFrame.new(origin + Vector3.new(-22, 3, -12)) * CFrame.Angles(0, math.rad(-90), 0)
 
 	local torso = Instance.new("Part")
 	torso.Name = "Torso"
@@ -2614,7 +2616,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 	-- All 3 Dog Walking kiosks live on the west inner sidewalk of the loop,
 	-- rotated so their readable face points +X (toward the park center).
 	local westKioskYaw = math.rad(-90)
-	local valueBoard, valueStatus, valuePad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-22, 0, -10)) * CFrame.Angles(0, westKioskYaw, 0), "Value", Theme.Brand)
+	local valueBoard, valueStatus, valuePad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, -10)) * CFrame.Angles(0, westKioskYaw, 0), "Value", Theme.Brand)
 	refreshValueKioskDisplay(player, valueStatus, valuePad)
 	PurchasePad.Wire(valuePad, function(p)
 		return p == player
@@ -2622,7 +2624,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		return IncomeSourceService.AttemptDogWalkingValueUpgrade(p, valueBoard, valueStatus, valuePad)
 	end, false)
 
-	local speedBoard, speedStatus, speedPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-22, 0, 10)) * CFrame.Angles(0, westKioskYaw, 0), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 10)) * CFrame.Angles(0, westKioskYaw, 0), "Speed", Theme.Secondary)
 	refreshSpeedKioskDisplay(player, speedStatus, speedPad)
 	PurchasePad.Wire(speedPad, function(p)
 		return p == player
@@ -2630,7 +2632,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		return IncomeSourceService.AttemptDogWalkingSpeedUpgrade(p, speedBoard, speedStatus, speedPad)
 	end, false)
 
-	local managerBoard, managerStatus, managerPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-22, 0, 0)) * CFrame.Angles(0, westKioskYaw, 0), "Manager", Theme.Gold)
+	local managerBoard, managerStatus, managerPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 0)) * CFrame.Angles(0, westKioskYaw, 0), "Manager", Theme.Gold)
 	local dogWalkingState = EconomyService.GetDogWalkingState(player)
 	if dogWalkingState.hasManager then
 		managerStatus.Text = "HIRED"
