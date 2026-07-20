@@ -119,7 +119,7 @@ type DogWalkingPlot = {
 	folder: Folder,
 	origin: Vector3,
 	hero: Model,
-	prompt: ProximityPrompt?,
+	post: BasePart?,
 }
 local dogWalkingPlots: { [Player]: DogWalkingPlot } = {}
 
@@ -2048,10 +2048,14 @@ end
 
 local function refreshDogWalkingPromptText(player: Player)
 	local plot = dogWalkingPlots[player]
-	if not plot or not plot.prompt then
+	if not plot or not plot.post then
 		return
 	end
-	plot.prompt.ObjectText = "Dog (+$" .. getDogWalkingReward(player) .. ")"
+	local gui = plot.post:FindFirstChild("ClickLabel")
+	local label = gui and gui:FindFirstChild("Label")
+	if label then
+		(label :: TextLabel).Text = "Click to Walk\n(+$" .. getDogWalkingReward(player) .. ")"
+	end
 end
 
 -- Standalone (not just a Triggered closure) so it's directly callable, same
@@ -2065,31 +2069,51 @@ function IncomeSourceService.HandleDogWalkingDelivery(player: Player, post: Base
 	return reward
 end
 
--- LeashPost (built by BuildDogWalkingHero) is the interactive part; this
--- just attaches the prompt to it. Owner-gated like DoorDash's houses since
--- this now lives in the player's own plot, not a shared world zone.
-function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model): ProximityPrompt?
+-- LeashPost (built by BuildDogWalkingHero) is the clickable part - a simple
+-- click-and-collect button (ClickDetector) rather than a walk-up-and-hold-E
+-- prompt, so the manual step reads as "click a button" like Sell Lemons'
+-- lemon stand rather than "walk to a delivery location". Owner-gated like
+-- DoorDash's houses since this lives in the player's own plot.
+function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model): ClickDetector?
 	local post = hero:FindFirstChild("LeashPost") :: BasePart?
-	if not post or post:FindFirstChildOfClass("ProximityPrompt") then
+	if not post or post:FindFirstChildOfClass("ClickDetector") then
 		return nil
 	end
 
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = "Walk"
-	prompt.ObjectText = "Dog (+$" .. getDogWalkingReward(player) .. ")"
-	prompt.HoldDuration = 0
-	prompt.MaxActivationDistance = 10
-	prompt.KeyboardKeyCode = Enum.KeyCode.E
-	prompt.Parent = post
+	local clickDetector = Instance.new("ClickDetector")
+	clickDetector.MaxActivationDistance = 16
+	clickDetector.Parent = post
 
-	prompt.Triggered:Connect(function(triggeredBy)
-		if triggeredBy ~= player then
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "ClickLabel"
+	gui.Adornee = post
+	gui.Size = UDim2.new(0, 150, 0, 56)
+	gui.StudsOffset = Vector3.new(0, 3.2, 0)
+	gui.AlwaysOnTop = true
+	gui.MaxDistance = 60
+	gui.Parent = post
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.TextStrokeTransparency = 0.2
+	label.TextWrapped = true
+	label.Text = "Click to Walk\n(+$" .. getDogWalkingReward(player) .. ")"
+	label.Parent = gui
+
+	clickDetector.MouseClick:Connect(function(clicker)
+		if clicker ~= player then
 			return
 		end
 		IncomeSourceService.HandleDogWalkingDelivery(player, post)
 	end)
 
-	return prompt
+	return clickDetector
 end
 
 -- One physical sign per track (Value / Speed) rather than a multi-button
@@ -2263,8 +2287,9 @@ end
 function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folder, origin: Vector3)
 	local base = origin + Vector3.new(0, 0, 15)
 	local hero = IncomeSourceService.BuildDogWalkingHero(folder, base)
-	local prompt = IncomeSourceService.ActivateDogWalking(player, hero)
-	dogWalkingPlots[player] = { folder = folder, origin = origin, hero = hero, prompt = prompt }
+	IncomeSourceService.ActivateDogWalking(player, hero)
+	local post = hero:FindFirstChild("LeashPost") :: BasePart?
+	dogWalkingPlots[player] = { folder = folder, origin = origin, hero = hero, post = post }
 
 	local valueBoard, valueStatus, valuePrompt = buildTierKiosk(folder, base + Vector3.new(-8, 0, 5), "Value", Theme.Brand)
 	refreshValueKioskDisplay(player, valueStatus, valuePrompt)
