@@ -102,20 +102,24 @@ PlanetHustleConfig.DogWalking = {
 	cooldown = 2,
 
 	-- Value track. Each tier REPLACES the previous (not stacked) - tier N's
-	-- multiplier applies directly to rewardPerLoop.
+	-- multiplier applies directly to rewardPerLoop. Ceiling dropped from 3x
+	-- to 2x during the balance retune - the old 3x combined with Neighborhood
+	-- (2x) and 3 parallel stations at Speed 3 pushed aggregate to $540/s,
+	-- ~9x Freelance's $50/s baseline.
 	valueTiers = {
-		{ name = "Better Leashes", cost = 20, multiplier = 1.5 },
-		{ name = "Treats & Toys", cost = 150, multiplier = 2 },
-		{ name = "Premium Grooming Add-on", cost = 600, multiplier = 3 },
+		{ name = "Better Leashes", cost = 20, multiplier = 1.25 },
+		{ name = "Treats & Toys", cost = 150, multiplier = 1.5 },
+		{ name = "Premium Grooming Add-on", cost = 600, multiplier = 2 },
 	},
 
 	-- Speed track. Each tier replaces the previous cooldown (seconds).
-	-- Rebalanced from {6, 3, 1.5} once the base dropped to 2 - the old
-	-- tier 1 would have been an anti-upgrade.
+	-- Retuned floor from 0.5s to 1.5s alongside the Value ceiling drop above -
+	-- max aggregate now lands at $120/s (15 base × 2 Value × 2 Neighborhood /
+	-- 1.5s × 3 stations), within the $80-120/s ceiling target.
 	speedTiers = {
-		{ name = "Comfortable Shoes", cost = 30, cooldown = 1.5 },
-		{ name = "Golf Cart", cost = 200, cooldown = 1 },
-		{ name = "E-Bike Delivery Route", cost = 800, cooldown = 0.5 },
+		{ name = "Comfortable Shoes", cost = 30, cooldown = 1.75 },
+		{ name = "Golf Cart", cost = 200, cooldown = 1.6 },
+		{ name = "E-Bike Delivery Route", cost = 800, cooldown = 1.5 },
 	},
 
 	-- "Hire a Dog Walker" - one-time purchase, flips Dog Walking from
