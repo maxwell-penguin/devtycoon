@@ -196,7 +196,7 @@ end
 -- the post and orients the board's readable face — pad ends up on the
 -- readable side automatically (local +Z of the post, matching SurfaceGui
 -- Face.Back).
-local function buildTierKiosk(folder: Instance, cframe: CFrame, trackLabel: string, boardColor: Color3)
+local function buildTierKiosk(folder: Instance, cframe: CFrame, trackLabel: string, boardColor: Color3, onboardingKey: string?)
 	local post = Instance.new("Part")
 	post.Name = trackLabel .. "KioskPost"
 	post.Anchored = true
@@ -247,7 +247,7 @@ local function buildTierKiosk(folder: Instance, cframe: CFrame, trackLabel: stri
 	-- board - the sign stays as the "what am I buying" display, the pad is
 	-- the touch-to-buy trigger. Placed on the readable side (local +Z of the
 	-- post) so pad direction rotates with the kiosk.
-	local pad = PurchasePad.Build(folder, (cframe * CFrame.new(0, -1.4, 2.5)).Position, boardColor, 2.5)
+	local pad = PurchasePad.Build(folder, (cframe * CFrame.new(0, -1.4, 2.5)).Position, boardColor, 2.5, onboardingKey)
 
 	return board, statusLabel, pad
 end
@@ -2036,7 +2036,7 @@ local function refreshDoorDashHouseSlot(player: Player, areaModel: Model, plot: 
 	priceLabel.Text = "House " .. index .. "\n$" .. NumberFormatter.Format(cost)
 	priceLabel.Parent = priceGui
 
-	local pad = PurchasePad.Build(areaModel, lotFloor.Position + Vector3.new(0, 0.5, 0), Theme.CashPositive, 3)
+	local pad = PurchasePad.Build(areaModel, lotFloor.Position + Vector3.new(0, 0.5, 0), Theme.CashPositive, 3, "doorDashHouse" .. index)
 	PurchasePad.Wire(pad, function(p)
 		return p == player
 	end, function(p)
@@ -2250,7 +2250,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 	-- points -X (toward the park center), matching the direction the houses
 	-- and the player approach them from.
 	local eastKioskYaw = math.rad(90)
-	local valueBoard, valueStatus, valuePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, -18)) * CFrame.Angles(0, eastKioskYaw, 0), "Value", Theme.Brand)
+	local valueBoard, valueStatus, valuePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, -18)) * CFrame.Angles(0, eastKioskYaw, 0), "Value", Theme.Brand, "doorDashValue")
 	refreshDoorDashValueKioskDisplay(player, valueStatus, valuePad)
 	PurchasePad.Wire(valuePad, function(p)
 		return p == player
@@ -2258,7 +2258,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		return IncomeSourceService.AttemptDoorDashValueUpgrade(p, valueBoard, valueStatus, valuePad)
 	end, false)
 
-	local speedBoard, speedStatus, speedPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, 18)) * CFrame.Angles(0, eastKioskYaw, 0), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, 18)) * CFrame.Angles(0, eastKioskYaw, 0), "Speed", Theme.Secondary, "doorDashSpeed")
 	refreshDoorDashSpeedKioskDisplay(player, speedStatus, speedPad)
 	PurchasePad.Wire(speedPad, function(p)
 		return p == player
@@ -2266,7 +2266,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		return IncomeSourceService.AttemptDoorDashSpeedUpgrade(p, speedBoard, speedStatus, speedPad)
 	end, false)
 
-	local managerBoard, managerStatus, managerPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, -8)) * CFrame.Angles(0, eastKioskYaw, 0), "Manager", Theme.Gold)
+	local managerBoard, managerStatus, managerPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, -8)) * CFrame.Angles(0, eastKioskYaw, 0), "Manager", Theme.Gold, "doorDashManager")
 	if state.hasManager then
 		managerStatus.Text = "HIRED"
 		managerPad.Transparency = 0.7
@@ -2281,7 +2281,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		end, true)
 	end
 
-	local vehicleBoard, vehicleStatus, vehiclePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, 8)) * CFrame.Angles(0, eastKioskYaw, 0), "Vehicle", Theme.AffordablePulse)
+	local vehicleBoard, vehicleStatus, vehiclePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, 8)) * CFrame.Angles(0, eastKioskYaw, 0), "Vehicle", Theme.AffordablePulse, "doorDashVehicle")
 	refreshDoorDashVehicleKioskDisplay(player, vehicleStatus, vehiclePad)
 	PurchasePad.Wire(vehiclePad, function(p)
 		return p == player
@@ -2360,7 +2360,7 @@ function IncomeSourceService.SetupPlayerDoorDash(player: Player, folder: Folder,
 	priceLabel.Text = "$" .. NumberFormatter.Format(Config.DoorDash.unlockCost)
 	priceLabel.Parent = priceGui
 
-	local pad = PurchasePad.Build(areaModel, unlockFloor.Position + Vector3.new(0, 1, 0), Theme.CashPositive, 4)
+	local pad = PurchasePad.Build(areaModel, unlockFloor.Position + Vector3.new(0, 1, 0), Theme.CashPositive, 4, "doorDashUnlock")
 
 	PurchasePad.Wire(pad, function(triggeredBy)
 		return triggeredBy == player
@@ -2585,6 +2585,10 @@ function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model)
 		return
 	end
 	CollectionService:AddTag(post, DOG_WALKING_CLICKABLE_TAG)
+	-- Interaction-hint anchor for the onboarding pointer's "$0 brand-new
+	-- player" fallback state (see OnboardingService). Not a purchase target -
+	-- the pointer just uses it as a "start here" arrow anchor.
+	post:SetAttribute("OnboardingKey", "dogWalkingClick")
 	refreshDogWalkingReward(player)
 end
 
@@ -2963,7 +2967,7 @@ local function buildDogWalkingStationSlot(player: Player, folder: Folder, origin
 	priceLabel.Text = "Station " .. stationIndex .. "\n$" .. NumberFormatter.Format(cost)
 	priceLabel.Parent = priceGui
 
-	local pad = PurchasePad.Build(folder, lotFloor.Position + Vector3.new(0, 0.5, 0), Theme.CashPositive, 3)
+	local pad = PurchasePad.Build(folder, lotFloor.Position + Vector3.new(0, 0.5, 0), Theme.CashPositive, 3, "dogWalkingStation" .. stationIndex)
 	PurchasePad.Wire(pad, function(p)
 		return p == player
 	end, function(p)
@@ -2988,7 +2992,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 	-- All 3 Dog Walking kiosks live on the west inner sidewalk of the loop,
 	-- rotated so their readable face points +X (toward the park center).
 	local westKioskYaw = math.rad(-90)
-	local valueBoard, valueStatus, valuePad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, -10)) * CFrame.Angles(0, westKioskYaw, 0), "Value", Theme.Brand)
+	local valueBoard, valueStatus, valuePad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, -10)) * CFrame.Angles(0, westKioskYaw, 0), "Value", Theme.Brand, "dogWalkingValue")
 	refreshValueKioskDisplay(player, valueStatus, valuePad)
 	PurchasePad.Wire(valuePad, function(p)
 		return p == player
@@ -2996,7 +3000,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		return IncomeSourceService.AttemptDogWalkingValueUpgrade(p, valueBoard, valueStatus, valuePad)
 	end, false)
 
-	local speedBoard, speedStatus, speedPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 10)) * CFrame.Angles(0, westKioskYaw, 0), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 10)) * CFrame.Angles(0, westKioskYaw, 0), "Speed", Theme.Secondary, "dogWalkingSpeed")
 	refreshSpeedKioskDisplay(player, speedStatus, speedPad)
 	PurchasePad.Wire(speedPad, function(p)
 		return p == player
@@ -3007,7 +3011,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 	-- The Scale ladder sits at Z=+18 - past Speed at +10 - since it's Dog
 	-- Walking's late-game endgame track and reads naturally as the "further
 	-- along the sidewalk" kiosk from the player's arrival direction.
-	local scaleBoard, scaleStatus, scalePad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 18)) * CFrame.Angles(0, westKioskYaw, 0), "Scale", Theme.AffordablePulse)
+	local scaleBoard, scaleStatus, scalePad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 18)) * CFrame.Angles(0, westKioskYaw, 0), "Scale", Theme.AffordablePulse, "dogWalkingScale")
 	refreshScaleKioskDisplay(player, scaleStatus, scalePad)
 	PurchasePad.Wire(scalePad, function(p)
 		return p == player
@@ -3015,7 +3019,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		return IncomeSourceService.AttemptDogWalkingScaleUpgrade(p, scaleBoard, scaleStatus, scalePad)
 	end, false)
 
-	local managerBoard, managerStatus, managerPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 0)) * CFrame.Angles(0, westKioskYaw, 0), "Manager", Theme.Gold)
+	local managerBoard, managerStatus, managerPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 0)) * CFrame.Angles(0, westKioskYaw, 0), "Manager", Theme.Gold, "dogWalkingManager")
 	local dogWalkingState = EconomyService.GetDogWalkingState(player)
 	if dogWalkingState.hasManager then
 		managerStatus.Text = "HIRED"
@@ -3146,7 +3150,7 @@ function IncomeSourceService.SetupPlayerNeighborhoodUpgrade(player: Player, fold
 	priceLabel.Text = "$" .. NumberFormatter.Format(Config.Neighborhood.upgradeCost)
 	priceLabel.Parent = priceGui
 
-	local pad = PurchasePad.Build(areaModel, unlockFloor.Position + Vector3.new(0, 1, 0), Theme.Gold, 4)
+	local pad = PurchasePad.Build(areaModel, unlockFloor.Position + Vector3.new(0, 1, 0), Theme.Gold, 4, "neighborhoodUpgrade")
 
 	PurchasePad.Wire(pad, function(triggeredBy)
 		return triggeredBy == player

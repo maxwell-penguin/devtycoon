@@ -20,6 +20,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Theme = require(ReplicatedStorage.Shared.Config.Theme)
 local IncomeSourceService = require(script.Parent.IncomeSourceService)
+local OnboardingService = require(script.Parent.OnboardingService)
 local PurchasePad = require(ReplicatedStorage.Shared.Modules.PurchasePad)
 
 local PlotService = {}
@@ -316,6 +317,7 @@ local function buildPlotForPlayer(player: Player, slot: number)
 	IncomeSourceService.SetupPlayerDogWalking(player, folder, origin)
 	IncomeSourceService.SetupPlayerDoorDash(player, folder, origin)
 	IncomeSourceService.SetupPlayerNeighborhoodUpgrade(player, folder, origin)
+	OnboardingService.OnPlotBuilt(player)
 
 	if player.Character then
 		task.spawn(teleportToPlot, player.Character, origin)
