@@ -2699,7 +2699,16 @@ end
 
 local function refreshScaleKioskDisplay(player: Player, statusLabel: TextLabel, pad: BasePart)
 	local state = EconomyService.GetDogWalkingState(player)
-	renderTierKioskDisplay(Config.DogWalking.scaleTiers[state.scaleTier + 1], statusLabel, pad)
+	local nextTier = Config.DogWalking.scaleTiers[state.scaleTier + 1]
+	if nextTier and nextTier.locked then
+		-- Locked cross-planet teaser: same visible slot as any other next
+		-- tier, but no cost line and a dimmed pad so it reads as "not
+		-- available here" rather than "affordable purchase".
+		statusLabel.Text = nextTier.name .. "\nUnlocks on Planet Brainrot"
+		pad.Transparency = 0.7
+		return
+	end
+	renderTierKioskDisplay(nextTier, statusLabel, pad)
 end
 
 -- Iterates every current station's hero and rebuilds its dog pack from the
@@ -2726,6 +2735,13 @@ function IncomeSourceService.AttemptDogWalkingScaleUpgrade(player: Player, board
 	local state = EconomyService.GetDogWalkingState(player)
 	local nextTier = Config.DogWalking.scaleTiers[state.scaleTier + 1]
 	if not nextTier then
+		return false
+	end
+	if nextTier.locked then
+		-- Cross-planet teaser stub: cleanly no-op with a hint. Returning
+		-- false triggers PurchasePad's fail-flash for feedback, and the
+		-- floating text explains why (no error, no crash, no state change).
+		FloatingText.Show(board, "Coming soon: Planet Brainrot", Theme.Warning)
 		return false
 	end
 	if not EconomyService.CanAfford(player, nextTier.cost) then

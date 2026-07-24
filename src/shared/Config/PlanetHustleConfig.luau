@@ -155,6 +155,15 @@ PlanetHustleConfig.DogWalking = {
 		{ name = "Peacock Package",     cost = 200000, packSize = 4, scaleMultiplier = 1.75, petKind = "peacock" },
 		{ name = "Baby Llama Package",  cost = 400000, packSize = 4, scaleMultiplier = 1.85, petKind = "llama" },
 		{ name = "Baby Ostrich Package", cost = 800000, packSize = 4, scaleMultiplier = 2.00, petKind = "ostrich" },
+
+		-- Locked cross-planet teaser: appears in the Scale kiosk display
+		-- after Ostrich (the top buyable tier) but has no purchase logic and
+		-- no visual pack rebuild - `locked = true` sentinel is what the
+		-- kiosk display and AttemptDogWalkingScaleUpgrade check to divert
+		-- into the "Unlocks on Planet Brainrot" no-op path. petKind /
+		-- scaleMultiplier / packSize aren't consulted for this entry (kept
+		-- as inert placeholders matching the shape).
+		{ name = "Brainrot Pets", cost = 0, packSize = 4, scaleMultiplier = 2.00, petKind = "brainrot", locked = true },
 	},
 }
 
