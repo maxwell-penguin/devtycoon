@@ -102,14 +102,15 @@ PlanetHustleConfig.DogWalking = {
 	cooldown = 2,
 
 	-- Value track. Each tier REPLACES the previous (not stacked) - tier N's
-	-- multiplier applies directly to rewardPerLoop. Ceiling dropped from 3x
-	-- to 2x during the balance retune - the old 3x combined with Neighborhood
-	-- (2x) and 3 parallel stations at Speed 3 pushed aggregate to $540/s,
-	-- ~9x Freelance's $50/s baseline.
+	-- multiplier applies directly to rewardPerLoop. Ceiling reduced from 2x
+	-- to 1.25x when the Scale ladder (Pack Size / Dog Quality / Exotic Pets)
+	-- was added below - Value now handles the early-game bumps, Scale
+	-- handles the endgame multiplier headroom, together landing at the
+	-- $150/s aggregate ceiling target.
 	valueTiers = {
-		{ name = "Better Leashes", cost = 20, multiplier = 1.25 },
-		{ name = "Treats & Toys", cost = 150, multiplier = 1.5 },
-		{ name = "Premium Grooming Add-on", cost = 600, multiplier = 2 },
+		{ name = "Better Leashes", cost = 20, multiplier = 1.1 },
+		{ name = "Treats & Toys", cost = 150, multiplier = 1.15 },
+		{ name = "Premium Grooming Add-on", cost = 600, multiplier = 1.25 },
 	},
 
 	-- Speed track. Each tier replaces the previous cooldown (seconds).
@@ -131,6 +132,24 @@ PlanetHustleConfig.DogWalking = {
 	-- free one, each a full LeashPost+dogs prop with its own ClickDetector
 	-- and Manager auto-collect loop.
 	stationCosts = { 300, 1500 },
+
+	-- Dog Walking's OWN scale identity: a single sequential ladder through
+	-- Pack Size → Dog Quality → Exotic Pets → Brainrot (locked teaser).
+	-- Each tier REPLACES the previous - scaleMultiplier applies directly to
+	-- rewardPerLoop, packSize sets the visual dog count on each station.
+	-- Balance ceiling at max (scaleMultiplier 2.0):
+	--   15 base × 1.25 Value × 2.0 Scale × 2 Neighborhood / 1.5s Speed × 3
+	--   stations = $150/s aggregate, within the $80-150/s target band.
+	-- Only Pack Size (steps 1-3) ships in the initial scale-tiers commit;
+	-- Dog Quality and Exotic Pets append to this table in follow-up commits.
+	-- petKind is a string tag the visual builder reads to pick asset/tint
+	-- (mutt = untinted beagle; later tiers add golden/white/purple tints
+	-- for quality tiers, primitive-built exotics for the top tiers).
+	scaleTiers = {
+		{ name = "Second Dog",  cost = 500,  packSize = 2, scaleMultiplier = 1.10, petKind = "mutt" },
+		{ name = "Third Dog",   cost = 2000, packSize = 3, scaleMultiplier = 1.20, petKind = "mutt" },
+		{ name = "Fourth Dog",  cost = 6000, packSize = 4, scaleMultiplier = 1.30, petKind = "mutt" },
+	},
 }
 
 -- Neighborhood Upgrade: the one Scale tier this pass builds (DoorDash's own

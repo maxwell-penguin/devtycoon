@@ -35,6 +35,9 @@ type DogWalkingState = {
 	-- Which of the 2 extra stations (beyond the always-free station 1) are
 	-- built. Index 1 = station 2, index 2 = station 3.
 	extraStations: { [number]: boolean },
+	-- Sequential Scale ladder: Pack Size → Dog Quality → Exotic Pets. 0 =
+	-- baseline (1 mutt); index into Config.DogWalking.scaleTiers otherwise.
+	scaleTier: number,
 }
 local profiles: {
 	[Player]: {
@@ -62,6 +65,7 @@ local function defaultDogWalking(): DogWalkingState
 		speedTier = 0,
 		hasManager = false,
 		extraStations = {},
+		scaleTier = 0,
 	}
 end
 
@@ -141,6 +145,9 @@ function EconomyService.LoadPlayer(player: Player): boolean
 	end
 	if not profiles[player].dogWalking.extraStations then
 		profiles[player].dogWalking.extraStations = {}
+	end
+	if not profiles[player].dogWalking.scaleTier then
+		profiles[player].dogWalking.scaleTier = 0
 	end
 	if not profiles[player].neighborhoodTier then
 		profiles[player].neighborhoodTier = 0

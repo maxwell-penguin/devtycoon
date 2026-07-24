@@ -917,44 +917,43 @@ local function buildDogWalkingDetails(zoneModel: Model, base: Vector3)
 	end
 end
 
--- The Dog Walking "hero": a leash post with a tangle of 3 dogs on Beam
--- leashes (CurveSize gives them a bit of sag/slack). LeashPost is the
--- interactive part — a fixed, always-findable anchor, unlike picking one
--- of the 3 dogs arbitrarily. `base` is a ground-level world position (was
--- previously derived from a Zone floor part; Dog Walking is now the
--- always-free per-plot starter, so it's just the plot-relative spot).
-function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, base: Vector3): Model
-	local hero = Instance.new("Model")
-	hero.Name = "Hero"
-	hero.Parent = zoneModel
+-- Per-pack-slot positions around the leash post, indexed 1..N. Only the
+-- first `packSize` slots are populated - so pack 1 uses slot 1, pack 4 uses
+-- all 4. Slot 4 sits behind the post so the tangle reads as a "cluster"
+-- rather than a line.
+local DOG_PACK_SLOT_OFFSETS = {
+	{ position = Vector3.new(2.2, 0, 1.2), yaw = math.rad(-30) },
+	{ position = Vector3.new(-2.0, 0, 1.6), yaw = math.rad(150) },
+	{ position = Vector3.new(0.4, 0, 2.6), yaw = math.rad(200) },
+	{ position = Vector3.new(-0.6, 0, -2.0), yaw = math.rad(20) },
+}
 
-	local post = Instance.new("Part")
-	post.Name = "LeashPost"
-	post.Anchored = true
-	post.CanCollide = true
-	post.Material = Enum.Material.Metal
-	post.Color = LEASH_POST_COLOR
-	post.Size = Vector3.new(0.5, 3, 0.5)
-	post.CFrame = CFrame.new(base + Vector3.new(0, 1.5, 0))
-	post.Parent = hero
-	hero.PrimaryPart = post
+-- Wipes any existing Dog*/Leash*/Collar* children under (hero, post) and
+-- rebuilds the pack from scratch based on the current scaleTier's packSize.
+-- Called both by BuildDogWalkingHero (initial pack) and by
+-- rebuildScaleVisuals (on Scale kiosk purchase).
+local function buildDogPack(hero: Model, post: BasePart, base: Vector3, packSize: number)
+	for _, child in ipairs(hero:GetChildren()) do
+		if child ~= post and (string.match(child.Name, "^Dog%d") ~= nil) then
+			child:Destroy()
+		end
+	end
+	for _, child in ipairs(post:GetChildren()) do
+		if string.match(child.Name, "^Leash%d") ~= nil or string.match(child.Name, "^Collar%d") ~= nil then
+			child:Destroy()
+		end
+	end
 
-	local leashTop = Instance.new("Attachment")
-	leashTop.Name = "LeashTop"
-	leashTop.Position = Vector3.new(0, 1.4, 0)
-	leashTop.Parent = post
+	local leashTop = post:FindFirstChild("LeashTop") :: Attachment?
+	if not leashTop then
+		return
+	end
 
-	local dogOffsets = {
-		{ position = Vector3.new(2.2, 0, 1.2), yaw = math.rad(-30) },
-		{ position = Vector3.new(-2.0, 0, 1.6), yaw = math.rad(150) },
-		{ position = Vector3.new(0.4, 0, 2.6), yaw = math.rad(200) },
-	}
-
-	local anyDogLoaded = false
-	for i, offset in ipairs(dogOffsets) do
+	local slots = math.min(packSize, #DOG_PACK_SLOT_OFFSETS)
+	for i = 1, slots do
+		local offset = DOG_PACK_SLOT_OFFSETS[i]
 		local dog = loadDogModel()
 		if dog then
-			anyDogLoaded = true
 			dog.Name = "Dog" .. i
 			dog.Parent = hero
 			local size = scaleAndPositionDog(dog, base + offset.position, offset.yaw)
@@ -979,10 +978,40 @@ function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, base: Vector3
 			leash.Parent = post
 		end
 	end
+end
 
-	if not anyDogLoaded then
-		warn("[IncomeSourceService] Failed to load any Dog Walking asset copies, tangle will be post-only")
-	end
+-- The Dog Walking "hero": a leash post with `packSize` dogs on Beam leashes
+-- (default 1 = baseline, up to 4 at Scale tier max). LeashPost is the
+-- interactive part - a fixed, always-findable anchor, unlike picking one of
+-- the dogs arbitrarily. `base` is a ground-level world position.
+function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, base: Vector3, packSize: number?): Model
+	local hero = Instance.new("Model")
+	hero.Name = "Hero"
+	hero.Parent = zoneModel
+
+	local post = Instance.new("Part")
+	post.Name = "LeashPost"
+	post.Anchored = true
+	post.CanCollide = true
+	post.Material = Enum.Material.Metal
+	post.Color = LEASH_POST_COLOR
+	post.Size = Vector3.new(0.5, 3, 0.5)
+	post.CFrame = CFrame.new(base + Vector3.new(0, 1.5, 0))
+	post.Parent = hero
+	hero.PrimaryPart = post
+	-- Stash base so rebuildScaleVisuals can find the ground-level anchor
+	-- without recomputing from post.Position (which sits 1.5 studs above
+	-- ground, and other pack offsets are ground-relative).
+	post:SetAttribute("BaseX", base.X)
+	post:SetAttribute("BaseY", base.Y)
+	post:SetAttribute("BaseZ", base.Z)
+
+	local leashTop = Instance.new("Attachment")
+	leashTop.Name = "LeashTop"
+	leashTop.Position = Vector3.new(0, 1.4, 0)
+	leashTop.Parent = post
+
+	buildDogPack(hero, post, base, packSize or 1)
 
 	buildDogWalkingDetails(zoneModel, base)
 
@@ -2241,12 +2270,14 @@ local function getDogWalkingReward(player: Player): number
 	local state = EconomyService.GetDogWalkingState(player)
 	local valueTier = state and Config.DogWalking.valueTiers[state.valueTier]
 	local valueMultiplier = valueTier and valueTier.multiplier or 1
+	local scaleTier = state and Config.DogWalking.scaleTiers[state.scaleTier]
+	local scaleMultiplier = scaleTier and scaleTier.scaleMultiplier or 1
 	local neighborhoodMultiplier = if EconomyService.GetNeighborhoodTier(player) > 0
 		then Config.Neighborhood.upgradeMultiplier
 		else 1
 	-- Fractional multipliers (1.5x etc.) on an integer base would otherwise
 	-- pay out fractional cash ($22.5) - round to whole dollars.
-	return math.floor(Config.DogWalking.rewardPerLoop * valueMultiplier * neighborhoodMultiplier + 0.5)
+	return math.floor(Config.DogWalking.rewardPerLoop * valueMultiplier * scaleMultiplier * neighborhoodMultiplier + 0.5)
 end
 
 -- The client's on-screen Walk button reads its reward from this
@@ -2310,8 +2341,17 @@ end
 -- the player's plot, and gives it an auto-collect loop immediately if the
 -- Manager is already hired. Shared by the always-free station 1 and any
 -- pad-purchased extra station.
+-- Reads the current Scale ladder's packSize (baseline 1) so a station built
+-- mid-progression - a fresh station 2/3 purchase, a rejoin, etc. - opens
+-- with the right visual dog count instead of always starting at 1.
+local function getCurrentPackSize(player: Player): number
+	local state = EconomyService.GetDogWalkingState(player)
+	local tier = state and Config.DogWalking.scaleTiers[state.scaleTier]
+	return tier and tier.packSize or 1
+end
+
 local function buildDogWalkingStation(player: Player, folder: Folder, position: Vector3, stationIndex: number): Model
-	local hero = IncomeSourceService.BuildDogWalkingHero(folder, position)
+	local hero = IncomeSourceService.BuildDogWalkingHero(folder, position, getCurrentPackSize(player))
 	-- BuildDogWalkingHero always names its Model "Hero" - fine for a single
 	-- station, but multiple stations in the same folder need distinct names
 	-- (still harmless functionally since nothing looks this up by name, but
@@ -2382,6 +2422,51 @@ function IncomeSourceService.AttemptDogWalkingSpeedUpgrade(player: Player, board
 	EconomyService.UpdateDogWalking(player, { speedTier = state.speedTier + 1 })
 	FloatingText.Show(board, nextTier.name .. "!", Theme.CashPositive)
 	refreshSpeedKioskDisplay(player, statusLabel, pad)
+	return true
+end
+
+local function refreshScaleKioskDisplay(player: Player, statusLabel: TextLabel, pad: BasePart)
+	local state = EconomyService.GetDogWalkingState(player)
+	renderTierKioskDisplay(Config.DogWalking.scaleTiers[state.scaleTier + 1], statusLabel, pad)
+end
+
+-- Iterates every current station's hero and rebuilds its dog pack from the
+-- current scaleTier's packSize. Called after AttemptDogWalkingScaleUpgrade
+-- so the visual dog count catches up with the reward change immediately.
+local function rebuildScaleVisuals(player: Player)
+	local plot = dogWalkingPlots[player]
+	if not plot then
+		return
+	end
+	local packSize = getCurrentPackSize(player)
+	for _, station in pairs(plot.stations) do
+		local base = Vector3.new(
+			station.post:GetAttribute("BaseX") or station.post.Position.X,
+			station.post:GetAttribute("BaseY") or station.post.Position.Y - 1.5,
+			station.post:GetAttribute("BaseZ") or station.post.Position.Z
+		)
+		buildDogPack(station.hero, station.post, base, packSize)
+	end
+end
+
+function IncomeSourceService.AttemptDogWalkingScaleUpgrade(player: Player, board: BasePart, statusLabel: TextLabel, pad: BasePart): boolean
+	local state = EconomyService.GetDogWalkingState(player)
+	local nextTier = Config.DogWalking.scaleTiers[state.scaleTier + 1]
+	if not nextTier then
+		return false
+	end
+	if not EconomyService.CanAfford(player, nextTier.cost) then
+		FloatingText.Show(board, "Need $" .. NumberFormatter.Format(nextTier.cost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, nextTier.cost) then
+		return false
+	end
+	EconomyService.UpdateDogWalking(player, { scaleTier = state.scaleTier + 1 })
+	FloatingText.Show(board, nextTier.name .. "!", Theme.CashPositive)
+	refreshScaleKioskDisplay(player, statusLabel, pad)
+	refreshDogWalkingReward(player)
+	rebuildScaleVisuals(player)
 	return true
 end
 
@@ -2628,6 +2713,17 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		return p == player
 	end, function(p)
 		return IncomeSourceService.AttemptDogWalkingSpeedUpgrade(p, speedBoard, speedStatus, speedPad)
+	end, false)
+
+	-- The Scale ladder sits at Z=+18 - past Speed at +10 - since it's Dog
+	-- Walking's late-game endgame track and reads naturally as the "further
+	-- along the sidewalk" kiosk from the player's arrival direction.
+	local scaleBoard, scaleStatus, scalePad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 18)) * CFrame.Angles(0, westKioskYaw, 0), "Scale", Theme.AffordablePulse)
+	refreshScaleKioskDisplay(player, scaleStatus, scalePad)
+	PurchasePad.Wire(scalePad, function(p)
+		return p == player
+	end, function(p)
+		return IncomeSourceService.AttemptDogWalkingScaleUpgrade(p, scaleBoard, scaleStatus, scalePad)
 	end, false)
 
 	local managerBoard, managerStatus, managerPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 0)) * CFrame.Angles(0, westKioskYaw, 0), "Manager", Theme.Gold)
