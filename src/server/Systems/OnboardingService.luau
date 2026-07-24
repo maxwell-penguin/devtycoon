@@ -258,10 +258,13 @@ local function getOrCreateStatValues(player: Player): (ObjectValue?, StringValue
 	return target, hint
 end
 
--- Called once by PlotService.buildPlotForPlayer after the plot's pads
--- have been built - runs a single compute pass and publishes the result.
--- Step 3 adds a 2s heartbeat loop on top; step 4 adds cutoff gating.
-function OnboardingService.OnPlotBuilt(player: Player)
+local REFRESH_INTERVAL = 2
+
+-- Per-player flag: true while the heartbeat loop should keep spinning.
+-- Cleared on PlayerRemoving so the loop exits at the next tick.
+local activeLoops: { [Player]: boolean } = {}
+
+local function publishTarget(player: Player)
 	local target, hint = getOrCreateStatValues(player)
 	if not target or not hint then
 		return
@@ -271,12 +274,33 @@ function OnboardingService.OnPlotBuilt(player: Player)
 	hint.Value = label or ""
 end
 
+-- Called once by PlotService.buildPlotForPlayer after the plot's pads have
+-- been built - publishes an initial target immediately and starts the
+-- heartbeat loop. Every REFRESH_INTERVAL seconds the target is
+-- recomputed; the client's arrow re-anchors automatically via
+-- GetPropertyChangedSignal on the ObjectValue. Step 4 adds the "past
+-- onboarding" cutoff that stops the loop for players who don't need
+-- guidance anymore.
+function OnboardingService.OnPlotBuilt(player: Player)
+	publishTarget(player)
+	if activeLoops[player] then
+		return
+	end
+	activeLoops[player] = true
+	task.spawn(function()
+		while activeLoops[player] and player.Parent do
+			task.wait(REFRESH_INTERVAL)
+			if not (activeLoops[player] and player.Parent) then
+				break
+			end
+			publishTarget(player)
+		end
+	end)
+end
+
 function OnboardingService.Init()
 	Players.PlayerRemoving:Connect(function(player)
-		-- ObjectValues on the player are cleaned up automatically when the
-		-- player leaves - no explicit teardown needed. Placeholder in case
-		-- step 3's heartbeat loop later needs per-player state cleanup.
-		local _ = player
+		activeLoops[player] = nil
 	end)
 end
 
