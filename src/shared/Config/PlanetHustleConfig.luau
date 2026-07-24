@@ -146,9 +146,12 @@ PlanetHustleConfig.DogWalking = {
 	-- (mutt = untinted beagle; later tiers add golden/white/purple tints
 	-- for quality tiers, primitive-built exotics for the top tiers).
 	scaleTiers = {
-		{ name = "Second Dog",  cost = 500,  packSize = 2, scaleMultiplier = 1.10, petKind = "mutt" },
-		{ name = "Third Dog",   cost = 2000, packSize = 3, scaleMultiplier = 1.20, petKind = "mutt" },
-		{ name = "Fourth Dog",  cost = 6000, packSize = 4, scaleMultiplier = 1.30, petKind = "mutt" },
+		{ name = "Second Dog",          cost = 500,    packSize = 2, scaleMultiplier = 1.10, petKind = "mutt" },
+		{ name = "Third Dog",           cost = 2000,   packSize = 3, scaleMultiplier = 1.20, petKind = "mutt" },
+		{ name = "Fourth Dog",          cost = 6000,   packSize = 4, scaleMultiplier = 1.30, petKind = "mutt" },
+		{ name = "Purebreds",           cost = 15000,  packSize = 4, scaleMultiplier = 1.40, petKind = "purebred" },
+		{ name = "Show Dogs",           cost = 40000,  packSize = 4, scaleMultiplier = 1.50, petKind = "show" },
+		{ name = "Champion Show Dogs",  cost = 100000, packSize = 4, scaleMultiplier = 1.65, petKind = "champion" },
 	},
 }
 

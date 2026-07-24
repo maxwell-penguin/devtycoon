@@ -928,11 +928,35 @@ local DOG_PACK_SLOT_OFFSETS = {
 	{ position = Vector3.new(-0.6, 0, -2.0), yaw = math.rad(20) },
 }
 
+-- Per-petKind uniform tint applied over the beagle asset. `nil` means the
+-- asset keeps its natural coloring (baseline mutt). Ponytail: recoloring
+-- the whole model uniformly loses the beagle's natural markings but adds
+-- clear tier signaling; sourcing a distinct Toolbox breed per tier would
+-- need Studio screenshot verification per prior-pass convention.
+local DOG_TINTS: { [string]: Color3? } = {
+	mutt = nil,
+	purebred = Color3.fromRGB(220, 180, 100), -- golden retriever gold
+	show = Color3.fromRGB(240, 240, 235), -- show poodle white
+	champion = Color3.fromRGB(160, 120, 200), -- champion "royalty" purple
+}
+
+local function applyPetTint(model: Model, petKind: string?)
+	local tint = petKind and DOG_TINTS[petKind]
+	if not tint then
+		return
+	end
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Color = tint
+		end
+	end
+end
+
 -- Wipes any existing Dog*/Leash*/Collar* children under (hero, post) and
--- rebuilds the pack from scratch based on the current scaleTier's packSize.
--- Called both by BuildDogWalkingHero (initial pack) and by
+-- rebuilds the pack from scratch based on the current scaleTier's packSize
+-- and petKind. Called both by BuildDogWalkingHero (initial pack) and by
 -- rebuildScaleVisuals (on Scale kiosk purchase).
-local function buildDogPack(hero: Model, post: BasePart, base: Vector3, packSize: number)
+local function buildDogPack(hero: Model, post: BasePart, base: Vector3, packSize: number, petKind: string?)
 	for _, child in ipairs(hero:GetChildren()) do
 		if child ~= post and (string.match(child.Name, "^Dog%d") ~= nil) then
 			child:Destroy()
@@ -957,6 +981,7 @@ local function buildDogPack(hero: Model, post: BasePart, base: Vector3, packSize
 			dog.Name = "Dog" .. i
 			dog.Parent = hero
 			local size = scaleAndPositionDog(dog, base + offset.position, offset.yaw)
+			applyPetTint(dog, petKind)
 
 			local dogCenter = (dog:GetBoundingBox())
 			local collar = Instance.new("Attachment")
@@ -981,10 +1006,11 @@ local function buildDogPack(hero: Model, post: BasePart, base: Vector3, packSize
 end
 
 -- The Dog Walking "hero": a leash post with `packSize` dogs on Beam leashes
--- (default 1 = baseline, up to 4 at Scale tier max). LeashPost is the
--- interactive part - a fixed, always-findable anchor, unlike picking one of
--- the dogs arbitrarily. `base` is a ground-level world position.
-function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, base: Vector3, packSize: number?): Model
+-- (default 1 = baseline, up to 4 at Scale tier max), tinted per `petKind`
+-- (nil = natural beagle coloring). LeashPost is the interactive part -
+-- a fixed, always-findable anchor, unlike picking one of the dogs
+-- arbitrarily. `base` is a ground-level world position.
+function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, base: Vector3, packSize: number?, petKind: string?): Model
 	local hero = Instance.new("Model")
 	hero.Name = "Hero"
 	hero.Parent = zoneModel
@@ -1011,7 +1037,7 @@ function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, base: Vector3
 	leashTop.Position = Vector3.new(0, 1.4, 0)
 	leashTop.Parent = post
 
-	buildDogPack(hero, post, base, packSize or 1)
+	buildDogPack(hero, post, base, packSize or 1, petKind)
 
 	buildDogWalkingDetails(zoneModel, base)
 
@@ -2341,17 +2367,22 @@ end
 -- the player's plot, and gives it an auto-collect loop immediately if the
 -- Manager is already hired. Shared by the always-free station 1 and any
 -- pad-purchased extra station.
--- Reads the current Scale ladder's packSize (baseline 1) so a station built
--- mid-progression - a fresh station 2/3 purchase, a rejoin, etc. - opens
--- with the right visual dog count instead of always starting at 1.
-local function getCurrentPackSize(player: Player): number
+-- Reads the current Scale ladder's packSize + petKind (baseline 1 mutt) so
+-- a station built mid-progression - a fresh station 2/3 purchase, a
+-- rejoin, etc. - opens with the right visual dog count AND breed tint
+-- instead of always starting at 1 mutt.
+local function getCurrentScaleVisuals(player: Player): (number, string?)
 	local state = EconomyService.GetDogWalkingState(player)
 	local tier = state and Config.DogWalking.scaleTiers[state.scaleTier]
-	return tier and tier.packSize or 1
+	if not tier then
+		return 1, nil
+	end
+	return tier.packSize, tier.petKind
 end
 
 local function buildDogWalkingStation(player: Player, folder: Folder, position: Vector3, stationIndex: number): Model
-	local hero = IncomeSourceService.BuildDogWalkingHero(folder, position, getCurrentPackSize(player))
+	local packSize, petKind = getCurrentScaleVisuals(player)
+	local hero = IncomeSourceService.BuildDogWalkingHero(folder, position, packSize, petKind)
 	-- BuildDogWalkingHero always names its Model "Hero" - fine for a single
 	-- station, but multiple stations in the same folder need distinct names
 	-- (still harmless functionally since nothing looks this up by name, but
@@ -2431,21 +2462,22 @@ local function refreshScaleKioskDisplay(player: Player, statusLabel: TextLabel, 
 end
 
 -- Iterates every current station's hero and rebuilds its dog pack from the
--- current scaleTier's packSize. Called after AttemptDogWalkingScaleUpgrade
--- so the visual dog count catches up with the reward change immediately.
+-- current scaleTier's packSize + petKind. Called after
+-- AttemptDogWalkingScaleUpgrade so the visual pack size AND breed tint
+-- catch up with the reward change immediately.
 local function rebuildScaleVisuals(player: Player)
 	local plot = dogWalkingPlots[player]
 	if not plot then
 		return
 	end
-	local packSize = getCurrentPackSize(player)
+	local packSize, petKind = getCurrentScaleVisuals(player)
 	for _, station in pairs(plot.stations) do
 		local base = Vector3.new(
 			station.post:GetAttribute("BaseX") or station.post.Position.X,
 			station.post:GetAttribute("BaseY") or station.post.Position.Y - 1.5,
 			station.post:GetAttribute("BaseZ") or station.post.Position.Z
 		)
-		buildDogPack(station.hero, station.post, base, packSize)
+		buildDogPack(station.hero, station.post, base, packSize, petKind)
 	end
 end
 
