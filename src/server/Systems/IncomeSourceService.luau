@@ -952,6 +952,248 @@ local function applyPetTint(model: Model, petKind: string?)
 	end
 end
 
+--------------------------------------------------------------------------------
+-- EXOTIC PET PRIMITIVES (Scale ladder tier 3)
+-- All primitive-built rather than Toolbox-sourced - keeps the codebase
+-- Rojo-sync-reproducible without a per-tier Studio screenshot-verification
+-- pass. Each returns a Model already positioned at `position` with `yaw`,
+-- roughly matching DOG_WALKING_TARGET_HEIGHT (~2.2 studs tall) so it reads
+-- as pack-mate-sized next to the beagle-scale dogs.
+--------------------------------------------------------------------------------
+
+local function buildPeacockPrimitive(position: Vector3, yaw: number): Model
+	local model = Instance.new("Model")
+	model.Name = "Peacock"
+	local origin = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
+
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Shape = Enum.PartType.Ball
+	body.Anchored = true
+	body.CanCollide = false
+	body.Material = Enum.Material.Neon
+	body.Color = Color3.fromRGB(30, 130, 140) -- peacock teal
+	body.Size = Vector3.new(0.9, 0.9, 0.9)
+	body.CFrame = origin * CFrame.new(0, 1.0, 0)
+	body.Parent = model
+	model.PrimaryPart = body
+
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Shape = Enum.PartType.Ball
+	head.Anchored = true
+	head.CanCollide = false
+	head.Material = Enum.Material.SmoothPlastic
+	head.Color = Color3.fromRGB(50, 90, 160)
+	head.Size = Vector3.new(0.45, 0.45, 0.45)
+	head.CFrame = origin * CFrame.new(0.4, 1.7, 0)
+	head.Parent = model
+
+	local beak = Instance.new("Part")
+	beak.Name = "Beak"
+	beak.Anchored = true
+	beak.CanCollide = false
+	beak.Material = Enum.Material.SmoothPlastic
+	beak.Color = Color3.fromRGB(200, 160, 80)
+	beak.Size = Vector3.new(0.25, 0.15, 0.3)
+	beak.CFrame = origin * CFrame.new(0.65, 1.7, 0)
+	beak.Parent = model
+
+	-- Fanned tail: 5 flat feathers behind the body, spread ~80° arc
+	for i = 1, 5 do
+		local feather = Instance.new("Part")
+		feather.Name = "TailFeather"
+		feather.Anchored = true
+		feather.CanCollide = false
+		feather.Material = Enum.Material.Neon
+		feather.Color = Color3.fromRGB(20 + i * 25, 130 + i * 15, 90 + i * 30)
+		feather.Size = Vector3.new(0.08, 1.4, 0.4)
+		local fanAngle = math.rad(-40 + (i - 1) * 20)
+		feather.CFrame = origin * CFrame.new(-0.5, 1.1, 0) * CFrame.Angles(0, fanAngle, 0) * CFrame.new(0, 0.5, -0.7)
+		feather.Parent = model
+	end
+
+	for _, side in ipairs({ -1, 1 }) do
+		local leg = Instance.new("Part")
+		leg.Name = "Leg"
+		leg.Shape = Enum.PartType.Cylinder
+		leg.Anchored = true
+		leg.CanCollide = false
+		leg.Material = Enum.Material.SmoothPlastic
+		leg.Color = Color3.fromRGB(190, 150, 80)
+		leg.Size = Vector3.new(1.0, 0.12, 0.12)
+		leg.CFrame = origin * CFrame.new(side * 0.2, 0.5, 0) * CFrame.Angles(0, 0, math.rad(90))
+		leg.Parent = model
+	end
+
+	return model
+end
+
+local function buildLlamaPrimitive(position: Vector3, yaw: number): Model
+	local model = Instance.new("Model")
+	model.Name = "BabyLlama"
+	local origin = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
+	local wool = Color3.fromRGB(235, 225, 200)
+
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Anchored = true
+	body.CanCollide = false
+	body.Material = Enum.Material.Fabric
+	body.Color = wool
+	body.Size = Vector3.new(0.7, 0.8, 1.4)
+	body.CFrame = origin * CFrame.new(0, 1.1, 0)
+	body.Parent = model
+	model.PrimaryPart = body
+
+	local neck = Instance.new("Part")
+	neck.Name = "Neck"
+	neck.Shape = Enum.PartType.Cylinder
+	neck.Anchored = true
+	neck.CanCollide = false
+	neck.Material = Enum.Material.Fabric
+	neck.Color = wool
+	neck.Size = Vector3.new(0.9, 0.35, 0.35)
+	-- Neck angled up-forward from body's front
+	neck.CFrame = origin * CFrame.new(0, 1.7, 0.55) * CFrame.Angles(0, 0, math.rad(60))
+	neck.Parent = model
+
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Anchored = true
+	head.CanCollide = false
+	head.Material = Enum.Material.Fabric
+	head.Color = wool
+	head.Size = Vector3.new(0.4, 0.45, 0.55)
+	head.CFrame = origin * CFrame.new(0, 2.1, 0.85)
+	head.Parent = model
+
+	for _, side in ipairs({ -1, 1 }) do
+		local ear = Instance.new("WedgePart")
+		ear.Name = "Ear"
+		ear.Anchored = true
+		ear.CanCollide = false
+		ear.Material = Enum.Material.Fabric
+		ear.Color = wool
+		ear.Size = Vector3.new(0.1, 0.28, 0.18)
+		ear.CFrame = origin * CFrame.new(side * 0.15, 2.35, 0.85)
+		ear.Parent = model
+	end
+
+	for _, side in ipairs({ -1, 1 }) do
+		for _, front in ipairs({ -1, 1 }) do
+			local leg = Instance.new("Part")
+			leg.Name = "Leg"
+			leg.Anchored = true
+			leg.CanCollide = false
+			leg.Material = Enum.Material.Fabric
+			leg.Color = wool
+			leg.Size = Vector3.new(0.22, 1.0, 0.22)
+			leg.CFrame = origin * CFrame.new(side * 0.25, 0.5, front * 0.55)
+			leg.Parent = model
+		end
+	end
+
+	return model
+end
+
+local function buildOstrichPrimitive(position: Vector3, yaw: number): Model
+	local model = Instance.new("Model")
+	model.Name = "BabyOstrich"
+	local origin = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
+	local plumage = Color3.fromRGB(40, 40, 45)
+	local skin = Color3.fromRGB(230, 200, 170)
+
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Shape = Enum.PartType.Ball
+	body.Anchored = true
+	body.CanCollide = false
+	body.Material = Enum.Material.SmoothPlastic
+	body.Color = plumage
+	body.Size = Vector3.new(1.0, 0.9, 1.1)
+	body.CFrame = origin * CFrame.new(0, 1.1, 0)
+	body.Parent = model
+	model.PrimaryPart = body
+
+	local neck = Instance.new("Part")
+	neck.Name = "Neck"
+	neck.Shape = Enum.PartType.Cylinder
+	neck.Anchored = true
+	neck.CanCollide = false
+	neck.Material = Enum.Material.SmoothPlastic
+	neck.Color = skin
+	neck.Size = Vector3.new(1.3, 0.2, 0.2)
+	neck.CFrame = origin * CFrame.new(0, 1.9, 0.2) * CFrame.Angles(0, 0, math.rad(75))
+	neck.Parent = model
+
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Anchored = true
+	head.CanCollide = false
+	head.Material = Enum.Material.SmoothPlastic
+	head.Color = skin
+	head.Size = Vector3.new(0.35, 0.4, 0.5)
+	head.CFrame = origin * CFrame.new(0, 2.5, 0.35)
+	head.Parent = model
+
+	local beak = Instance.new("Part")
+	beak.Name = "Beak"
+	beak.Anchored = true
+	beak.CanCollide = false
+	beak.Material = Enum.Material.SmoothPlastic
+	beak.Color = Color3.fromRGB(200, 160, 90)
+	beak.Size = Vector3.new(0.15, 0.12, 0.25)
+	beak.CFrame = origin * CFrame.new(0, 2.5, 0.65)
+	beak.Parent = model
+
+	for _, side in ipairs({ -1, 1 }) do
+		local leg = Instance.new("Part")
+		leg.Name = "Leg"
+		leg.Anchored = true
+		leg.CanCollide = false
+		leg.Material = Enum.Material.SmoothPlastic
+		leg.Color = skin
+		leg.Size = Vector3.new(0.18, 1.0, 0.18)
+		leg.CFrame = origin * CFrame.new(side * 0.2, 0.5, 0)
+		leg.Parent = model
+	end
+
+	return model
+end
+
+-- Returns (model, size) for whichever pet the current petKind names. Dogs
+-- (nil/mutt/purebred/show/champion) route through the existing beagle
+-- asset + tint path; exotics build from primitives above. Callers use
+-- `size` for collar attachment offsets.
+local function buildPet(petKind: string?, position: Vector3, yaw: number, parent: Instance): (Model?, Vector3?)
+	if petKind == "peacock" then
+		local model = buildPeacockPrimitive(position, yaw)
+		model.Parent = parent
+		local _, size = model:GetBoundingBox()
+		return model, size
+	elseif petKind == "llama" then
+		local model = buildLlamaPrimitive(position, yaw)
+		model.Parent = parent
+		local _, size = model:GetBoundingBox()
+		return model, size
+	elseif petKind == "ostrich" then
+		local model = buildOstrichPrimitive(position, yaw)
+		model.Parent = parent
+		local _, size = model:GetBoundingBox()
+		return model, size
+	end
+
+	local dog = loadDogModel()
+	if not dog then
+		return nil, nil
+	end
+	dog.Parent = parent
+	local size = scaleAndPositionDog(dog, position, yaw)
+	applyPetTint(dog, petKind)
+	return dog, size
+end
+
 -- Wipes any existing Dog*/Leash*/Collar* children under (hero, post) and
 -- rebuilds the pack from scratch based on the current scaleTier's packSize
 -- and petKind. Called both by BuildDogWalkingHero (initial pack) and by
@@ -976,18 +1218,17 @@ local function buildDogPack(hero: Model, post: BasePart, base: Vector3, packSize
 	local slots = math.min(packSize, #DOG_PACK_SLOT_OFFSETS)
 	for i = 1, slots do
 		local offset = DOG_PACK_SLOT_OFFSETS[i]
-		local dog = loadDogModel()
-		if dog then
-			dog.Name = "Dog" .. i
-			dog.Parent = hero
-			local size = scaleAndPositionDog(dog, base + offset.position, offset.yaw)
-			applyPetTint(dog, petKind)
+		local pet, size = buildPet(petKind, base + offset.position, offset.yaw, hero)
+		if pet and size then
+			-- "Dog" prefix kept even for exotics so the wipe pattern above
+			-- (^Dog%d) catches them cleanly on rebuild.
+			pet.Name = "Dog" .. i
 
-			local dogCenter = (dog:GetBoundingBox())
+			local petCenter = (pet:GetBoundingBox())
 			local collar = Instance.new("Attachment")
 			collar.Name = "Collar" .. i
 			collar.Parent = post
-			collar.WorldPosition = dogCenter.Position + Vector3.new(0, size.Y * 0.3, size.Z * 0.35)
+			collar.WorldPosition = petCenter.Position + Vector3.new(0, size.Y * 0.3, size.Z * 0.35)
 
 			local leash = Instance.new("Beam")
 			leash.Name = "Leash" .. i

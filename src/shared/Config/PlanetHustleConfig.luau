@@ -152,6 +152,9 @@ PlanetHustleConfig.DogWalking = {
 		{ name = "Purebreds",           cost = 15000,  packSize = 4, scaleMultiplier = 1.40, petKind = "purebred" },
 		{ name = "Show Dogs",           cost = 40000,  packSize = 4, scaleMultiplier = 1.50, petKind = "show" },
 		{ name = "Champion Show Dogs",  cost = 100000, packSize = 4, scaleMultiplier = 1.65, petKind = "champion" },
+		{ name = "Peacock Package",     cost = 200000, packSize = 4, scaleMultiplier = 1.75, petKind = "peacock" },
+		{ name = "Baby Llama Package",  cost = 400000, packSize = 4, scaleMultiplier = 1.85, petKind = "llama" },
+		{ name = "Baby Ostrich Package", cost = 800000, packSize = 4, scaleMultiplier = 2.00, petKind = "ostrich" },
 	},
 }
 
