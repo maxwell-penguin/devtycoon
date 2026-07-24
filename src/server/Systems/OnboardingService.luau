@@ -259,19 +259,39 @@ local function getOrCreateStatValues(player: Player): (ObjectValue?, StringValue
 end
 
 local REFRESH_INTERVAL = 2
+-- Cutoff: pointer stops appearing once the player has bought this many
+-- things total across all tracks, OR unlocked Neighborhood Upgrade. Cash
+-- isn't checked here since it's not monotonic - a player who once had
+-- $50k but spent it all is arguably still learning the game. Purchase
+-- count and Neighborhood ownership are both derived from persisted state,
+-- so the cutoff naturally carries across sessions with no extra plumbing.
+local CUTOFF_PURCHASE_COUNT = 6
 
 -- Per-player flag: true while the heartbeat loop should keep spinning.
--- Cleared on PlayerRemoving so the loop exits at the next tick.
+-- Cleared on PlayerRemoving OR when the cutoff fires so the loop exits.
 local activeLoops: { [Player]: boolean } = {}
 
-local function publishTarget(player: Player)
+local function hasCompletedOnboarding(player: Player): boolean
+	if EconomyService.GetNeighborhoodTier(player) > 0 then
+		return true
+	end
+	return countPurchases(player) >= CUTOFF_PURCHASE_COUNT
+end
+
+local function publishTarget(player: Player): boolean
 	local target, hint = getOrCreateStatValues(player)
 	if not target or not hint then
-		return
+		return false
+	end
+	if hasCompletedOnboarding(player) then
+		target.Value = nil
+		hint.Value = ""
+		return true -- signal "we're done, don't re-run"
 	end
 	local pad, label = computeTarget(player)
 	target.Value = pad
 	hint.Value = label or ""
+	return false
 end
 
 -- Called once by PlotService.buildPlotForPlayer after the plot's pads have
@@ -282,8 +302,8 @@ end
 -- onboarding" cutoff that stops the loop for players who don't need
 -- guidance anymore.
 function OnboardingService.OnPlotBuilt(player: Player)
-	publishTarget(player)
-	if activeLoops[player] then
+	local done = publishTarget(player)
+	if done or activeLoops[player] then
 		return
 	end
 	activeLoops[player] = true
@@ -293,7 +313,10 @@ function OnboardingService.OnPlotBuilt(player: Player)
 			if not (activeLoops[player] and player.Parent) then
 				break
 			end
-			publishTarget(player)
+			if publishTarget(player) then
+				activeLoops[player] = nil
+				break
+			end
 		end
 	end)
 end
