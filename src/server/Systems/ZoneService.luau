@@ -173,7 +173,8 @@ local function spawnZone(zone: ZoneDef)
 		model,
 		floor.Position + Vector3.new(0, floor.Size.Y / 2 + 0.5, 0),
 		zone.ownedColor,
-		math.min(zone.size.X, zone.size.Z) / 2 - 1
+		math.min(zone.size.X, zone.size.Z) / 2 - 1,
+		"zone_" .. zone.id
 	)
 	PurchasePad.Wire(pad, function(_player)
 		return true -- shared-world zone: anyone can attempt, AttemptPurchase gates per-player ownership

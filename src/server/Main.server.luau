@@ -8,6 +8,7 @@ local IncomeSourceService = require(Systems.IncomeSourceService)
 local LotteryService = require(Systems.LotteryService)
 local PurchaseEffects = require(Systems.PurchaseEffects)
 local PlotService = require(Systems.PlotService)
+local OnboardingService = require(Systems.OnboardingService)
 
 local Remotes = Instance.new("Folder")
 Remotes.Name = "Remotes"
@@ -19,6 +20,7 @@ ZoneService.Init()
 IncomeSourceService.Init()
 LotteryService.Init()
 PlotService.Init()
+OnboardingService.Init()
 
 local function onPlayerAdded(player: Player)
 	local isNewProfile = EconomyService.LoadPlayer(player)

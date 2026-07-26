@@ -13,7 +13,11 @@ local PAD_DEBOUNCE = 0.4
 local FAIL_FLASH_COLOR = Color3.fromRGB(255, 60, 60)
 
 -- Flat circular pad (Cylinder shape rotated so its round face points up).
-function PurchasePad.Build(parent: Instance, position: Vector3, color: Color3, radius: number?): BasePart
+-- `onboardingKey` (optional): string tag stashed as an attribute so
+-- OnboardingService can find this pad when suggesting "next thing to buy".
+-- Callsites that aren't part of onboarding progression (e.g., the lobby's
+-- claim pad) omit it and the pad simply isn't a candidate.
+function PurchasePad.Build(parent: Instance, position: Vector3, color: Color3, radius: number?, onboardingKey: string?): BasePart
 	local d = (radius or 4) * 2
 	local pad = Instance.new("Part")
 	pad.Name = "Pad"
@@ -25,6 +29,9 @@ function PurchasePad.Build(parent: Instance, position: Vector3, color: Color3, r
 	pad.Size = Vector3.new(0.3, d, d)
 	pad.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
 	pad.Parent = parent
+	if onboardingKey then
+		pad:SetAttribute("OnboardingKey", onboardingKey)
+	end
 	return pad
 end
 
