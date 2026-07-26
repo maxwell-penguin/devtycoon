@@ -5,8 +5,13 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
 
 local InsertService = game:GetService("InsertService")
+
+local DOG_WALKING_CLICK_REMOTE = "DogWalkingClick"
+local DOG_WALKING_CLICKABLE_TAG = "DogWalkingClickable"
+local DOG_WALKING_REWARD_STAT = "DogWalkingReward"
 
 local Config = require(ReplicatedStorage.Shared.Config.PlanetHustleConfig)
 local Theme = require(ReplicatedStorage.Shared.Config.Theme)
@@ -17,7 +22,6 @@ local NumberFormatter = require(ReplicatedStorage.Shared.Modules.NumberFormatter
 local PurchasePad = require(ReplicatedStorage.Shared.Modules.PurchasePad)
 
 local DOOR_DASH_HOUSE_COUNT = 4
-local DOOR_DASH_HOUSE_SPACING = 20
 local FLASH_COLOR = Theme.CashPositive
 
 -- Toolbox asset picked by name/thumbnail match — "Pizza Delivery Bike Vehicle
@@ -188,8 +192,11 @@ end
 -- Generic tier-upgrade kiosk builder - one physical sign per track rather
 -- than a multi-button menu, shared by both Dog Walking and DoorDash (and any
 -- future hustle that gets this same Value/Speed pattern). Placed early in
--- the file since both hustles' sections below need it.
-local function buildTierKiosk(folder: Instance, position: Vector3, trackLabel: string, boardColor: Color3)
+-- the file since both hustles' sections below need it. `cframe` positions
+-- the post and orients the board's readable face — pad ends up on the
+-- readable side automatically (local +Z of the post, matching SurfaceGui
+-- Face.Back).
+local function buildTierKiosk(folder: Instance, cframe: CFrame, trackLabel: string, boardColor: Color3)
 	local post = Instance.new("Part")
 	post.Name = trackLabel .. "KioskPost"
 	post.Anchored = true
@@ -197,7 +204,7 @@ local function buildTierKiosk(folder: Instance, position: Vector3, trackLabel: s
 	post.Material = Enum.Material.Metal
 	post.Color = Color3.fromRGB(150, 150, 155)
 	post.Size = Vector3.new(0.3, 3, 0.3)
-	post.CFrame = CFrame.new(position)
+	post.CFrame = cframe
 	post.Parent = folder
 
 	local board = Instance.new("Part")
@@ -238,8 +245,9 @@ local function buildTierKiosk(folder: Instance, position: Vector3, trackLabel: s
 
 	-- Stand-on-pad at the sign's foot, instead of a ProximityPrompt on the
 	-- board - the sign stays as the "what am I buying" display, the pad is
-	-- the touch-to-buy trigger.
-	local pad = PurchasePad.Build(folder, position + Vector3.new(0, -1.4, 2.5), boardColor, 2.5)
+	-- the touch-to-buy trigger. Placed on the readable side (local +Z of the
+	-- post) so pad direction rotates with the kiosk.
+	local pad = PurchasePad.Build(folder, (cframe * CFrame.new(0, -1.4, 2.5)).Position, boardColor, 2.5)
 
 	return board, statusLabel, pad
 end
@@ -909,53 +917,318 @@ local function buildDogWalkingDetails(zoneModel: Model, base: Vector3)
 	end
 end
 
--- The Dog Walking "hero": a leash post with a tangle of 3 dogs on Beam
--- leashes (CurveSize gives them a bit of sag/slack). LeashPost is the
--- interactive part — a fixed, always-findable anchor, unlike picking one
--- of the 3 dogs arbitrarily. `base` is a ground-level world position (was
--- previously derived from a Zone floor part; Dog Walking is now the
--- always-free per-plot starter, so it's just the plot-relative spot).
-function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, base: Vector3): Model
-	local hero = Instance.new("Model")
-	hero.Name = "Hero"
-	hero.Parent = zoneModel
+-- Per-pack-slot positions around the leash post, indexed 1..N. Only the
+-- first `packSize` slots are populated - so pack 1 uses slot 1, pack 4 uses
+-- all 4. Slot 4 sits behind the post so the tangle reads as a "cluster"
+-- rather than a line.
+local DOG_PACK_SLOT_OFFSETS = {
+	{ position = Vector3.new(2.2, 0, 1.2), yaw = math.rad(-30) },
+	{ position = Vector3.new(-2.0, 0, 1.6), yaw = math.rad(150) },
+	{ position = Vector3.new(0.4, 0, 2.6), yaw = math.rad(200) },
+	{ position = Vector3.new(-0.6, 0, -2.0), yaw = math.rad(20) },
+}
 
-	local post = Instance.new("Part")
-	post.Name = "LeashPost"
-	post.Anchored = true
-	post.CanCollide = true
-	post.Material = Enum.Material.Metal
-	post.Color = LEASH_POST_COLOR
-	post.Size = Vector3.new(0.5, 3, 0.5)
-	post.CFrame = CFrame.new(base + Vector3.new(0, 1.5, 0))
-	post.Parent = hero
-	hero.PrimaryPart = post
+-- Per-petKind uniform tint applied over the beagle asset. `nil` means the
+-- asset keeps its natural coloring (baseline mutt). Ponytail: recoloring
+-- the whole model uniformly loses the beagle's natural markings but adds
+-- clear tier signaling; sourcing a distinct Toolbox breed per tier would
+-- need Studio screenshot verification per prior-pass convention.
+local DOG_TINTS: { [string]: Color3? } = {
+	mutt = nil,
+	purebred = Color3.fromRGB(220, 180, 100), -- golden retriever gold
+	show = Color3.fromRGB(240, 240, 235), -- show poodle white
+	champion = Color3.fromRGB(160, 120, 200), -- champion "royalty" purple
+}
 
-	local leashTop = Instance.new("Attachment")
-	leashTop.Name = "LeashTop"
-	leashTop.Position = Vector3.new(0, 1.4, 0)
-	leashTop.Parent = post
+local function applyPetTint(model: Model, petKind: string?)
+	local tint = petKind and DOG_TINTS[petKind]
+	if not tint then
+		return
+	end
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Color = tint
+		end
+	end
+end
 
-	local dogOffsets = {
-		{ position = Vector3.new(2.2, 0, 1.2), yaw = math.rad(-30) },
-		{ position = Vector3.new(-2.0, 0, 1.6), yaw = math.rad(150) },
-		{ position = Vector3.new(0.4, 0, 2.6), yaw = math.rad(200) },
-	}
+--------------------------------------------------------------------------------
+-- EXOTIC PET PRIMITIVES (Scale ladder tier 3)
+-- All primitive-built rather than Toolbox-sourced - keeps the codebase
+-- Rojo-sync-reproducible without a per-tier Studio screenshot-verification
+-- pass. Each returns a Model already positioned at `position` with `yaw`,
+-- roughly matching DOG_WALKING_TARGET_HEIGHT (~2.2 studs tall) so it reads
+-- as pack-mate-sized next to the beagle-scale dogs.
+--------------------------------------------------------------------------------
 
-	local anyDogLoaded = false
-	for i, offset in ipairs(dogOffsets) do
-		local dog = loadDogModel()
-		if dog then
-			anyDogLoaded = true
-			dog.Name = "Dog" .. i
-			dog.Parent = hero
-			local size = scaleAndPositionDog(dog, base + offset.position, offset.yaw)
+local function buildPeacockPrimitive(position: Vector3, yaw: number): Model
+	local model = Instance.new("Model")
+	model.Name = "Peacock"
+	local origin = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
 
-			local dogCenter = (dog:GetBoundingBox())
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Shape = Enum.PartType.Ball
+	body.Anchored = true
+	body.CanCollide = false
+	body.Material = Enum.Material.Neon
+	body.Color = Color3.fromRGB(30, 130, 140) -- peacock teal
+	body.Size = Vector3.new(0.9, 0.9, 0.9)
+	body.CFrame = origin * CFrame.new(0, 1.0, 0)
+	body.Parent = model
+	model.PrimaryPart = body
+
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Shape = Enum.PartType.Ball
+	head.Anchored = true
+	head.CanCollide = false
+	head.Material = Enum.Material.SmoothPlastic
+	head.Color = Color3.fromRGB(50, 90, 160)
+	head.Size = Vector3.new(0.45, 0.45, 0.45)
+	head.CFrame = origin * CFrame.new(0.4, 1.7, 0)
+	head.Parent = model
+
+	local beak = Instance.new("Part")
+	beak.Name = "Beak"
+	beak.Anchored = true
+	beak.CanCollide = false
+	beak.Material = Enum.Material.SmoothPlastic
+	beak.Color = Color3.fromRGB(200, 160, 80)
+	beak.Size = Vector3.new(0.25, 0.15, 0.3)
+	beak.CFrame = origin * CFrame.new(0.65, 1.7, 0)
+	beak.Parent = model
+
+	-- Fanned tail: 5 flat feathers behind the body, spread ~80° arc
+	for i = 1, 5 do
+		local feather = Instance.new("Part")
+		feather.Name = "TailFeather"
+		feather.Anchored = true
+		feather.CanCollide = false
+		feather.Material = Enum.Material.Neon
+		feather.Color = Color3.fromRGB(20 + i * 25, 130 + i * 15, 90 + i * 30)
+		feather.Size = Vector3.new(0.08, 1.4, 0.4)
+		local fanAngle = math.rad(-40 + (i - 1) * 20)
+		feather.CFrame = origin * CFrame.new(-0.5, 1.1, 0) * CFrame.Angles(0, fanAngle, 0) * CFrame.new(0, 0.5, -0.7)
+		feather.Parent = model
+	end
+
+	for _, side in ipairs({ -1, 1 }) do
+		local leg = Instance.new("Part")
+		leg.Name = "Leg"
+		leg.Shape = Enum.PartType.Cylinder
+		leg.Anchored = true
+		leg.CanCollide = false
+		leg.Material = Enum.Material.SmoothPlastic
+		leg.Color = Color3.fromRGB(190, 150, 80)
+		leg.Size = Vector3.new(1.0, 0.12, 0.12)
+		leg.CFrame = origin * CFrame.new(side * 0.2, 0.5, 0) * CFrame.Angles(0, 0, math.rad(90))
+		leg.Parent = model
+	end
+
+	return model
+end
+
+local function buildLlamaPrimitive(position: Vector3, yaw: number): Model
+	local model = Instance.new("Model")
+	model.Name = "BabyLlama"
+	local origin = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
+	local wool = Color3.fromRGB(235, 225, 200)
+
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Anchored = true
+	body.CanCollide = false
+	body.Material = Enum.Material.Fabric
+	body.Color = wool
+	body.Size = Vector3.new(0.7, 0.8, 1.4)
+	body.CFrame = origin * CFrame.new(0, 1.1, 0)
+	body.Parent = model
+	model.PrimaryPart = body
+
+	local neck = Instance.new("Part")
+	neck.Name = "Neck"
+	neck.Shape = Enum.PartType.Cylinder
+	neck.Anchored = true
+	neck.CanCollide = false
+	neck.Material = Enum.Material.Fabric
+	neck.Color = wool
+	neck.Size = Vector3.new(0.9, 0.35, 0.35)
+	-- Neck angled up-forward from body's front
+	neck.CFrame = origin * CFrame.new(0, 1.7, 0.55) * CFrame.Angles(0, 0, math.rad(60))
+	neck.Parent = model
+
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Anchored = true
+	head.CanCollide = false
+	head.Material = Enum.Material.Fabric
+	head.Color = wool
+	head.Size = Vector3.new(0.4, 0.45, 0.55)
+	head.CFrame = origin * CFrame.new(0, 2.1, 0.85)
+	head.Parent = model
+
+	for _, side in ipairs({ -1, 1 }) do
+		local ear = Instance.new("WedgePart")
+		ear.Name = "Ear"
+		ear.Anchored = true
+		ear.CanCollide = false
+		ear.Material = Enum.Material.Fabric
+		ear.Color = wool
+		ear.Size = Vector3.new(0.1, 0.28, 0.18)
+		ear.CFrame = origin * CFrame.new(side * 0.15, 2.35, 0.85)
+		ear.Parent = model
+	end
+
+	for _, side in ipairs({ -1, 1 }) do
+		for _, front in ipairs({ -1, 1 }) do
+			local leg = Instance.new("Part")
+			leg.Name = "Leg"
+			leg.Anchored = true
+			leg.CanCollide = false
+			leg.Material = Enum.Material.Fabric
+			leg.Color = wool
+			leg.Size = Vector3.new(0.22, 1.0, 0.22)
+			leg.CFrame = origin * CFrame.new(side * 0.25, 0.5, front * 0.55)
+			leg.Parent = model
+		end
+	end
+
+	return model
+end
+
+local function buildOstrichPrimitive(position: Vector3, yaw: number): Model
+	local model = Instance.new("Model")
+	model.Name = "BabyOstrich"
+	local origin = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
+	local plumage = Color3.fromRGB(40, 40, 45)
+	local skin = Color3.fromRGB(230, 200, 170)
+
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Shape = Enum.PartType.Ball
+	body.Anchored = true
+	body.CanCollide = false
+	body.Material = Enum.Material.SmoothPlastic
+	body.Color = plumage
+	body.Size = Vector3.new(1.0, 0.9, 1.1)
+	body.CFrame = origin * CFrame.new(0, 1.1, 0)
+	body.Parent = model
+	model.PrimaryPart = body
+
+	local neck = Instance.new("Part")
+	neck.Name = "Neck"
+	neck.Shape = Enum.PartType.Cylinder
+	neck.Anchored = true
+	neck.CanCollide = false
+	neck.Material = Enum.Material.SmoothPlastic
+	neck.Color = skin
+	neck.Size = Vector3.new(1.3, 0.2, 0.2)
+	neck.CFrame = origin * CFrame.new(0, 1.9, 0.2) * CFrame.Angles(0, 0, math.rad(75))
+	neck.Parent = model
+
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Anchored = true
+	head.CanCollide = false
+	head.Material = Enum.Material.SmoothPlastic
+	head.Color = skin
+	head.Size = Vector3.new(0.35, 0.4, 0.5)
+	head.CFrame = origin * CFrame.new(0, 2.5, 0.35)
+	head.Parent = model
+
+	local beak = Instance.new("Part")
+	beak.Name = "Beak"
+	beak.Anchored = true
+	beak.CanCollide = false
+	beak.Material = Enum.Material.SmoothPlastic
+	beak.Color = Color3.fromRGB(200, 160, 90)
+	beak.Size = Vector3.new(0.15, 0.12, 0.25)
+	beak.CFrame = origin * CFrame.new(0, 2.5, 0.65)
+	beak.Parent = model
+
+	for _, side in ipairs({ -1, 1 }) do
+		local leg = Instance.new("Part")
+		leg.Name = "Leg"
+		leg.Anchored = true
+		leg.CanCollide = false
+		leg.Material = Enum.Material.SmoothPlastic
+		leg.Color = skin
+		leg.Size = Vector3.new(0.18, 1.0, 0.18)
+		leg.CFrame = origin * CFrame.new(side * 0.2, 0.5, 0)
+		leg.Parent = model
+	end
+
+	return model
+end
+
+-- Returns (model, size) for whichever pet the current petKind names. Dogs
+-- (nil/mutt/purebred/show/champion) route through the existing beagle
+-- asset + tint path; exotics build from primitives above. Callers use
+-- `size` for collar attachment offsets.
+local function buildPet(petKind: string?, position: Vector3, yaw: number, parent: Instance): (Model?, Vector3?)
+	if petKind == "peacock" then
+		local model = buildPeacockPrimitive(position, yaw)
+		model.Parent = parent
+		local _, size = model:GetBoundingBox()
+		return model, size
+	elseif petKind == "llama" then
+		local model = buildLlamaPrimitive(position, yaw)
+		model.Parent = parent
+		local _, size = model:GetBoundingBox()
+		return model, size
+	elseif petKind == "ostrich" then
+		local model = buildOstrichPrimitive(position, yaw)
+		model.Parent = parent
+		local _, size = model:GetBoundingBox()
+		return model, size
+	end
+
+	local dog = loadDogModel()
+	if not dog then
+		return nil, nil
+	end
+	dog.Parent = parent
+	local size = scaleAndPositionDog(dog, position, yaw)
+	applyPetTint(dog, petKind)
+	return dog, size
+end
+
+-- Wipes any existing Dog*/Leash*/Collar* children under (hero, post) and
+-- rebuilds the pack from scratch based on the current scaleTier's packSize
+-- and petKind. Called both by BuildDogWalkingHero (initial pack) and by
+-- rebuildScaleVisuals (on Scale kiosk purchase).
+local function buildDogPack(hero: Model, post: BasePart, base: Vector3, packSize: number, petKind: string?)
+	for _, child in ipairs(hero:GetChildren()) do
+		if child ~= post and (string.match(child.Name, "^Dog%d") ~= nil) then
+			child:Destroy()
+		end
+	end
+	for _, child in ipairs(post:GetChildren()) do
+		if string.match(child.Name, "^Leash%d") ~= nil or string.match(child.Name, "^Collar%d") ~= nil then
+			child:Destroy()
+		end
+	end
+
+	local leashTop = post:FindFirstChild("LeashTop") :: Attachment?
+	if not leashTop then
+		return
+	end
+
+	local slots = math.min(packSize, #DOG_PACK_SLOT_OFFSETS)
+	for i = 1, slots do
+		local offset = DOG_PACK_SLOT_OFFSETS[i]
+		local pet, size = buildPet(petKind, base + offset.position, offset.yaw, hero)
+		if pet and size then
+			-- "Dog" prefix kept even for exotics so the wipe pattern above
+			-- (^Dog%d) catches them cleanly on rebuild.
+			pet.Name = "Dog" .. i
+
+			local petCenter = (pet:GetBoundingBox())
 			local collar = Instance.new("Attachment")
 			collar.Name = "Collar" .. i
 			collar.Parent = post
-			collar.WorldPosition = dogCenter.Position + Vector3.new(0, size.Y * 0.3, size.Z * 0.35)
+			collar.WorldPosition = petCenter.Position + Vector3.new(0, size.Y * 0.3, size.Z * 0.35)
 
 			local leash = Instance.new("Beam")
 			leash.Name = "Leash" .. i
@@ -971,10 +1244,41 @@ function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, base: Vector3
 			leash.Parent = post
 		end
 	end
+end
 
-	if not anyDogLoaded then
-		warn("[IncomeSourceService] Failed to load any Dog Walking asset copies, tangle will be post-only")
-	end
+-- The Dog Walking "hero": a leash post with `packSize` dogs on Beam leashes
+-- (default 1 = baseline, up to 4 at Scale tier max), tinted per `petKind`
+-- (nil = natural beagle coloring). LeashPost is the interactive part -
+-- a fixed, always-findable anchor, unlike picking one of the dogs
+-- arbitrarily. `base` is a ground-level world position.
+function IncomeSourceService.BuildDogWalkingHero(zoneModel: Model, base: Vector3, packSize: number?, petKind: string?): Model
+	local hero = Instance.new("Model")
+	hero.Name = "Hero"
+	hero.Parent = zoneModel
+
+	local post = Instance.new("Part")
+	post.Name = "LeashPost"
+	post.Anchored = true
+	post.CanCollide = true
+	post.Material = Enum.Material.Metal
+	post.Color = LEASH_POST_COLOR
+	post.Size = Vector3.new(0.5, 3, 0.5)
+	post.CFrame = CFrame.new(base + Vector3.new(0, 1.5, 0))
+	post.Parent = hero
+	hero.PrimaryPart = post
+	-- Stash base so rebuildScaleVisuals can find the ground-level anchor
+	-- without recomputing from post.Position (which sits 1.5 studs above
+	-- ground, and other pack offsets are ground-relative).
+	post:SetAttribute("BaseX", base.X)
+	post:SetAttribute("BaseY", base.Y)
+	post:SetAttribute("BaseZ", base.Z)
+
+	local leashTop = Instance.new("Attachment")
+	leashTop.Name = "LeashTop"
+	leashTop.Position = Vector3.new(0, 1.4, 0)
+	leashTop.Parent = post
+
+	buildDogPack(hero, post, base, packSize or 1, petKind)
 
 	buildDogWalkingDetails(zoneModel, base)
 
@@ -1272,8 +1576,6 @@ local function buildApartmentBuilding(areaModel: Instance, origin: Vector3)
 	if areaModel:FindFirstChild("ApartmentBuilding") then
 		return
 	end
-	local startX = -((DOOR_DASH_HOUSE_COUNT - 1) * DOOR_DASH_HOUSE_SPACING) / 2
-	local apartmentX = startX + DOOR_DASH_HOUSE_COUNT * DOOR_DASH_HOUSE_SPACING
 
 	local building = Instance.new("Part")
 	building.Name = "ApartmentBuilding"
@@ -1282,7 +1584,10 @@ local function buildApartmentBuilding(areaModel: Instance, origin: Vector3)
 	building.Material = Enum.Material.Concrete
 	building.Color = Color3.fromRGB(180, 175, 165)
 	building.Size = Vector3.new(8, 16, 8)
-	building.Position = origin + Vector3.new(apartmentX, 8, -30)
+	-- Sits at north-center of the loop between houses 6+7, facing -Z (south)
+	-- into the park. Rotating the building rotates its window CFrames below
+	-- along with it, so they end up on the south face automatically.
+	building.CFrame = CFrame.new(origin + Vector3.new(0, 8, 40)) * CFrame.Angles(0, math.rad(180), 0)
 	building.Parent = areaModel
 
 	for i = 1, 3 do
@@ -1428,7 +1733,11 @@ local function buildDispatcherNpc(folder: Instance, origin: Vector3): Model
 	npc.Name = "DispatcherNpc"
 	npc.Parent = folder
 
-	local startPos = origin + Vector3.new(-30, 3, -27)
+	-- East road (X=+22, on the road near its house-side edge). Yaw +90° so
+	-- local +X = world +Z: the patrol below walks along the road and the
+	-- torso "faces" -X (into the park). Kept off the inner sidewalk (X=+16)
+	-- since the DoorDash kiosks live there.
+	local startCFrame = CFrame.new(origin + Vector3.new(22, 3, -25)) * CFrame.Angles(0, math.rad(90), 0)
 
 	local torso = Instance.new("Part")
 	torso.Name = "Torso"
@@ -1437,7 +1746,7 @@ local function buildDispatcherNpc(folder: Instance, origin: Vector3): Model
 	torso.Material = Enum.Material.SmoothPlastic
 	torso.Color = Theme.Brand
 	torso.Size = Vector3.new(1.4, 2, 0.8)
-	torso.CFrame = CFrame.new(startPos)
+	torso.CFrame = startCFrame
 	torso.Parent = npc
 	npc.PrimaryPart = torso
 
@@ -1475,7 +1784,7 @@ local function buildDispatcherNpc(folder: Instance, origin: Vector3): Model
 	package.Parent = npc
 
 	local pointA = torso.CFrame
-	local pointB = torso.CFrame * CFrame.new(60, 0, 0)
+	local pointB = torso.CFrame * CFrame.new(50, 0, 0)
 	loopModelBetweenPoints(npc, pointA, pointB, 8)
 
 	return npc
@@ -1539,35 +1848,37 @@ function IncomeSourceService.AttemptDoorDashManagerHire(
 	return true
 end
 
--- Slots 5-8 sit behind the main row (not extending it sideways) - extending
--- in +X would collide with the ApartmentBuilding the Neighborhood Upgrade
--- places at startX + DOOR_DASH_HOUSE_COUNT*spacing, and could approach a
--- neighboring plot's footprint (PLOT_ORIGINS are 80 studs apart in X).
--- 5-6 = Cargo Plane's auto-grant (unchanged mechanic). 7-8 = new pads
--- beyond it (purchase-pad branch), one row further back.
-local DOOR_DASH_EXTRA_HOUSE_OFFSETS = {
-	Vector3.new(-12, 4, -55), -- slot 5
-	Vector3.new(12, 4, -55), -- slot 6
-	Vector3.new(-12, 4, -75), -- slot 7
-	Vector3.new(12, 4, -75), -- slot 8
+-- Slots 5-8 sit on the loop's NORTH side, flanking the ApartmentBuilding
+-- (placed at X=0 by the Neighborhood Upgrade), facing -Z into the park.
+-- 5-6 = Cargo Plane's auto-grant; 7-8 = pad-purchased extras (Phase 4).
+-- All 4 north-side slots share the same +40 Z and 180° yaw.
+local DOOR_DASH_EXTRA_HOUSE_SLOTS = {
+	{ pos = Vector3.new(-22, 4, 40), yaw = math.rad(180) }, -- slot 5 (NW corner)
+	{ pos = Vector3.new(-11, 4, 40), yaw = math.rad(180) }, -- slot 6
+	{ pos = Vector3.new(11, 4, 40), yaw = math.rad(180) }, -- slot 7
+	{ pos = Vector3.new(22, 4, 40), yaw = math.rad(180) }, -- slot 8 (NE corner)
 }
 
--- Where slot `index` (1-8) sits, relative to the plot origin. 1-4 are the
--- original row; 5+ come from the offsets table above.
-local function doorDashHousePosition(origin: Vector3, index: number): Vector3
+-- Where slot `index` (1-8) sits, relative to the plot origin, including yaw
+-- so the house's door + porch details face the loop's park center. 1-4 are
+-- the east-side row at X=+30 (yaw +90° → door faces -X); 5-8 come from the
+-- north-side slot table above.
+local function doorDashHouseCFrame(origin: Vector3, index: number): CFrame
 	if index <= DOOR_DASH_HOUSE_COUNT then
-		local startX = -((DOOR_DASH_HOUSE_COUNT - 1) * DOOR_DASH_HOUSE_SPACING) / 2
-		return origin + Vector3.new(startX + (index - 1) * DOOR_DASH_HOUSE_SPACING, 4, -30)
+		local zSpacing = 16
+		local z = -((DOOR_DASH_HOUSE_COUNT - 1) * zSpacing) / 2 + (index - 1) * zSpacing
+		return CFrame.new(origin + Vector3.new(30, 4, z)) * CFrame.Angles(0, math.rad(90), 0)
 	end
-	return origin + DOOR_DASH_EXTRA_HOUSE_OFFSETS[index - DOOR_DASH_HOUSE_COUNT]
+	local slot = DOOR_DASH_EXTRA_HOUSE_SLOTS[index - DOOR_DASH_HOUSE_COUNT]
+	return CFrame.new(origin + slot.pos) * CFrame.Angles(0, slot.yaw, 0)
 end
 
-local function buildHouseAt(player: Player, areaModel: Model, position: Vector3, index: number): BasePart
+local function buildHouseAt(player: Player, areaModel: Model, cframe: CFrame, index: number): BasePart
 	local house = Instance.new("Part")
 	house.Name = "DoorDashHouse_" .. index
 	house.Size = Vector3.new(8, 8, 8)
 	house.Anchored = true
-	house.Position = position
+	house.CFrame = cframe
 	house.Color = DOOR_DASH_HOUSE_COLORS[((index - 1) % #DOOR_DASH_HOUSE_COLORS) + 1]
 	house.Material = Enum.Material.Wood
 	house.Parent = areaModel
@@ -1618,8 +1929,8 @@ end
 -- caller) - shared by the initial neighborhood build, a purchase's success
 -- path, and Cargo Plane's auto-grant.
 local function buildDoorDashOwnedHouse(player: Player, areaModel: Model, plot: DoorDashPlot, index: number)
-	local position = doorDashHousePosition(plot.origin, index)
-	local house = buildHouseAt(player, areaModel, position, index)
+	local cframe = doorDashHouseCFrame(plot.origin, index)
+	local house = buildHouseAt(player, areaModel, cframe, index)
 	if EconomyService.GetNeighborhoodTier(player) > 0 then
 		addHouseUpgradeTrim(house)
 	end
@@ -1693,13 +2004,13 @@ local function refreshDoorDashHouseSlot(player: Player, areaModel: Model, plot: 
 		return
 	end
 
-	local position = doorDashHousePosition(plot.origin, index)
+	local houseCFrame = doorDashHouseCFrame(plot.origin, index)
 	local lotFloor = Instance.new("Part")
 	lotFloor.Name = "HouseLot_" .. index
 	lotFloor.Anchored = true
 	lotFloor.CanCollide = false
 	lotFloor.Size = Vector3.new(8, 0.5, 8)
-	lotFloor.Position = position - Vector3.new(0, 3.75, 0)
+	lotFloor.Position = houseCFrame.Position - Vector3.new(0, 3.75, 0)
 	lotFloor.Color = Theme.Locked
 	lotFloor.Material = Enum.Material.Neon
 	lotFloor.Transparency = 0.5
@@ -1934,7 +2245,12 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		buildDoorDashVehicleHero(areaModel, origin, state.vehicleTier)
 	end
 
-	local valueBoard, valueStatus, valuePad = buildTierKiosk(areaModel, origin + Vector3.new(-24, 0, -24), "Value", Theme.Brand)
+	-- All 4 DoorDash kiosks live on the east inner sidewalk of the loop,
+	-- interleaved with the 4 east-side houses; rotated so their readable face
+	-- points -X (toward the park center), matching the direction the houses
+	-- and the player approach them from.
+	local eastKioskYaw = math.rad(90)
+	local valueBoard, valueStatus, valuePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, -18)) * CFrame.Angles(0, eastKioskYaw, 0), "Value", Theme.Brand)
 	refreshDoorDashValueKioskDisplay(player, valueStatus, valuePad)
 	PurchasePad.Wire(valuePad, function(p)
 		return p == player
@@ -1942,7 +2258,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		return IncomeSourceService.AttemptDoorDashValueUpgrade(p, valueBoard, valueStatus, valuePad)
 	end, false)
 
-	local speedBoard, speedStatus, speedPad = buildTierKiosk(areaModel, origin + Vector3.new(24, 0, -24), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, 18)) * CFrame.Angles(0, eastKioskYaw, 0), "Speed", Theme.Secondary)
 	refreshDoorDashSpeedKioskDisplay(player, speedStatus, speedPad)
 	PurchasePad.Wire(speedPad, function(p)
 		return p == player
@@ -1950,7 +2266,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		return IncomeSourceService.AttemptDoorDashSpeedUpgrade(p, speedBoard, speedStatus, speedPad)
 	end, false)
 
-	local managerBoard, managerStatus, managerPad = buildTierKiosk(areaModel, origin + Vector3.new(-8, 0, -24), "Manager", Theme.Gold)
+	local managerBoard, managerStatus, managerPad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, -8)) * CFrame.Angles(0, eastKioskYaw, 0), "Manager", Theme.Gold)
 	if state.hasManager then
 		managerStatus.Text = "HIRED"
 		managerPad.Transparency = 0.7
@@ -1965,7 +2281,7 @@ local function buildDoorDashNeighborhood(player: Player, areaModel: Model, origi
 		end, true)
 	end
 
-	local vehicleBoard, vehicleStatus, vehiclePad = buildTierKiosk(areaModel, origin + Vector3.new(8, 0, -24), "Vehicle", Theme.AffordablePulse)
+	local vehicleBoard, vehicleStatus, vehiclePad = buildTierKiosk(areaModel, CFrame.new(origin + Vector3.new(16, 0, 8)) * CFrame.Angles(0, eastKioskYaw, 0), "Vehicle", Theme.AffordablePulse)
 	refreshDoorDashVehicleKioskDisplay(player, vehicleStatus, vehiclePad)
 	PurchasePad.Wire(vehiclePad, function(p)
 		return p == player
@@ -2105,6 +2421,26 @@ function IncomeSourceService.Init()
 		IncomeSourceService.CleanupPlayerDogWalking(player)
 		IncomeSourceService.DeactivateFreelanceHub(player)
 	end)
+
+	local remotes = ReplicatedStorage:WaitForChild("Remotes")
+	local clickRemote = Instance.new("RemoteEvent")
+	clickRemote.Name = DOG_WALKING_CLICK_REMOTE
+	clickRemote.Parent = remotes
+	clickRemote.OnServerEvent:Connect(function(player: Player, post: any)
+		-- Validate: real BasePart, tagged as a Dog Walking post, and
+		-- inside the sender's own plot folder (Neighborhood_<UserId>).
+		if typeof(post) ~= "Instance" or not post:IsA("BasePart") then
+			return
+		end
+		if not CollectionService:HasTag(post, DOG_WALKING_CLICKABLE_TAG) then
+			return
+		end
+		local plot = dogWalkingPlots[player]
+		if not plot or not post:IsDescendantOf(plot.folder) then
+			return
+		end
+		IncomeSourceService.HandleDogWalkingDelivery(player, post)
+	end)
 end
 
 function IncomeSourceService.SetupPlayer(player: Player)
@@ -2116,6 +2452,11 @@ function IncomeSourceService.SetupPlayer(player: Player)
 	incomePerSecond.Name = "IncomePerSecond"
 	incomePerSecond.Value = 0
 	incomePerSecond.Parent = stats
+
+	local dogWalkingReward = Instance.new("NumberValue")
+	dogWalkingReward.Name = DOG_WALKING_REWARD_STAT
+	dogWalkingReward.Value = 0
+	dogWalkingReward.Parent = stats
 end
 
 function IncomeSourceService.GetIncomePerSecond(player: Player): number
@@ -2196,26 +2537,26 @@ local function getDogWalkingReward(player: Player): number
 	local state = EconomyService.GetDogWalkingState(player)
 	local valueTier = state and Config.DogWalking.valueTiers[state.valueTier]
 	local valueMultiplier = valueTier and valueTier.multiplier or 1
+	local scaleTier = state and Config.DogWalking.scaleTiers[state.scaleTier]
+	local scaleMultiplier = scaleTier and scaleTier.scaleMultiplier or 1
 	local neighborhoodMultiplier = if EconomyService.GetNeighborhoodTier(player) > 0
 		then Config.Neighborhood.upgradeMultiplier
 		else 1
 	-- Fractional multipliers (1.5x etc.) on an integer base would otherwise
 	-- pay out fractional cash ($22.5) - round to whole dollars.
-	return math.floor(Config.DogWalking.rewardPerLoop * valueMultiplier * neighborhoodMultiplier + 0.5)
+	return math.floor(Config.DogWalking.rewardPerLoop * valueMultiplier * scaleMultiplier * neighborhoodMultiplier + 0.5)
 end
 
-local function refreshDogWalkingPromptText(player: Player)
-	local plot = dogWalkingPlots[player]
-	if not plot then
-		return
-	end
-	local text = "Click to Walk\n(+$" .. getDogWalkingReward(player) .. ")"
-	for _, station in pairs(plot.stations) do
-		local gui = station.post:FindFirstChild("ClickLabel")
-		local label = gui and gui:FindFirstChild("Label")
-		if label then
-			(label :: TextLabel).Text = text
-		end
+-- The client's on-screen Walk button reads its reward from this
+-- PlanetHustleStats/DogWalkingReward NumberValue (same pattern as
+-- IncomePerSecond, which HUDController already listens to). Called on
+-- every event that could change getDogWalkingReward's output (Value tier,
+-- Neighborhood Upgrade, initial station-plot setup).
+local function refreshDogWalkingReward(player: Player)
+	local stats = getStatsFolder(player)
+	local value = stats and stats:FindFirstChild(DOG_WALKING_REWARD_STAT)
+	if value then
+		(value :: NumberValue).Value = getDogWalkingReward(player)
 	end
 end
 
@@ -2230,51 +2571,21 @@ function IncomeSourceService.HandleDogWalkingDelivery(player: Player, post: Base
 	return reward
 end
 
--- LeashPost (built by BuildDogWalkingHero) is the clickable part - a simple
--- click-and-collect button (ClickDetector) rather than a walk-up-and-hold-E
--- prompt, so the manual step reads as "click a button" like Sell Lemons'
--- lemon stand rather than "walk to a delivery location". Owner-gated like
--- DoorDash's houses since this lives in the player's own plot.
-function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model): ClickDetector?
+-- LeashPost (built by BuildDogWalkingHero) is tagged so the client's Walk
+-- button UI can find it by CollectionService and show/hide based on
+-- proximity to the player's HumanoidRootPart. Clicking the on-screen
+-- button fires the DogWalkingClick RemoteEvent (wired in Init) which
+-- routes back to HandleDogWalkingDelivery here, keeping the reward /
+-- cooldown path unchanged. Owner-gating: the plot folder is named
+-- Neighborhood_<UserId>, and the server-side handler re-checks that the
+-- fired post belongs to the sender's own plot before paying out.
+function IncomeSourceService.ActivateDogWalking(player: Player, hero: Model)
 	local post = hero:FindFirstChild("LeashPost") :: BasePart?
-	if not post or post:FindFirstChildOfClass("ClickDetector") then
-		return nil
+	if not post then
+		return
 	end
-
-	local clickDetector = Instance.new("ClickDetector")
-	clickDetector.MaxActivationDistance = 16
-	clickDetector.Parent = post
-
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "ClickLabel"
-	gui.Adornee = post
-	gui.Size = UDim2.new(0, 150, 0, 56)
-	gui.StudsOffset = Vector3.new(0, 3.2, 0)
-	gui.AlwaysOnTop = true
-	gui.MaxDistance = 60
-	gui.Parent = post
-
-	local label = Instance.new("TextLabel")
-	label.Name = "Label"
-	label.BackgroundTransparency = 1
-	label.Size = UDim2.fromScale(1, 1)
-	label.Font = Enum.Font.GothamBold
-	label.TextScaled = true
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-	label.TextStrokeTransparency = 0.2
-	label.TextWrapped = true
-	label.Text = "Click to Walk\n(+$" .. getDogWalkingReward(player) .. ")"
-	label.Parent = gui
-
-	clickDetector.MouseClick:Connect(function(clicker)
-		if clicker ~= player then
-			return
-		end
-		IncomeSourceService.HandleDogWalkingDelivery(player, post)
-	end)
-
-	return clickDetector
+	CollectionService:AddTag(post, DOG_WALKING_CLICKABLE_TAG)
+	refreshDogWalkingReward(player)
 end
 
 -- Auto-collect loop for one station: fires HandleDogWalkingDelivery on the
@@ -2297,8 +2608,22 @@ end
 -- the player's plot, and gives it an auto-collect loop immediately if the
 -- Manager is already hired. Shared by the always-free station 1 and any
 -- pad-purchased extra station.
+-- Reads the current Scale ladder's packSize + petKind (baseline 1 mutt) so
+-- a station built mid-progression - a fresh station 2/3 purchase, a
+-- rejoin, etc. - opens with the right visual dog count AND breed tint
+-- instead of always starting at 1 mutt.
+local function getCurrentScaleVisuals(player: Player): (number, string?)
+	local state = EconomyService.GetDogWalkingState(player)
+	local tier = state and Config.DogWalking.scaleTiers[state.scaleTier]
+	if not tier then
+		return 1, nil
+	end
+	return tier.packSize, tier.petKind
+end
+
 local function buildDogWalkingStation(player: Player, folder: Folder, position: Vector3, stationIndex: number): Model
-	local hero = IncomeSourceService.BuildDogWalkingHero(folder, position)
+	local packSize, petKind = getCurrentScaleVisuals(player)
+	local hero = IncomeSourceService.BuildDogWalkingHero(folder, position, packSize, petKind)
 	-- BuildDogWalkingHero always names its Model "Hero" - fine for a single
 	-- station, but multiple stations in the same folder need distinct names
 	-- (still harmless functionally since nothing looks this up by name, but
@@ -2349,7 +2674,7 @@ function IncomeSourceService.AttemptDogWalkingValueUpgrade(player: Player, board
 	EconomyService.UpdateDogWalking(player, { valueTier = state.valueTier + 1 })
 	FloatingText.Show(board, nextTier.name .. "!", Theme.CashPositive)
 	refreshValueKioskDisplay(player, statusLabel, pad)
-	refreshDogWalkingPromptText(player)
+	refreshDogWalkingReward(player)
 	return true
 end
 
@@ -2372,13 +2697,81 @@ function IncomeSourceService.AttemptDogWalkingSpeedUpgrade(player: Player, board
 	return true
 end
 
+local function refreshScaleKioskDisplay(player: Player, statusLabel: TextLabel, pad: BasePart)
+	local state = EconomyService.GetDogWalkingState(player)
+	local nextTier = Config.DogWalking.scaleTiers[state.scaleTier + 1]
+	if nextTier and nextTier.locked then
+		-- Locked cross-planet teaser: same visible slot as any other next
+		-- tier, but no cost line and a dimmed pad so it reads as "not
+		-- available here" rather than "affordable purchase".
+		statusLabel.Text = nextTier.name .. "\nUnlocks on Planet Brainrot"
+		pad.Transparency = 0.7
+		return
+	end
+	renderTierKioskDisplay(nextTier, statusLabel, pad)
+end
+
+-- Iterates every current station's hero and rebuilds its dog pack from the
+-- current scaleTier's packSize + petKind. Called after
+-- AttemptDogWalkingScaleUpgrade so the visual pack size AND breed tint
+-- catch up with the reward change immediately.
+local function rebuildScaleVisuals(player: Player)
+	local plot = dogWalkingPlots[player]
+	if not plot then
+		return
+	end
+	local packSize, petKind = getCurrentScaleVisuals(player)
+	for _, station in pairs(plot.stations) do
+		local base = Vector3.new(
+			station.post:GetAttribute("BaseX") or station.post.Position.X,
+			station.post:GetAttribute("BaseY") or station.post.Position.Y - 1.5,
+			station.post:GetAttribute("BaseZ") or station.post.Position.Z
+		)
+		buildDogPack(station.hero, station.post, base, packSize, petKind)
+	end
+end
+
+function IncomeSourceService.AttemptDogWalkingScaleUpgrade(player: Player, board: BasePart, statusLabel: TextLabel, pad: BasePart): boolean
+	local state = EconomyService.GetDogWalkingState(player)
+	local nextTier = Config.DogWalking.scaleTiers[state.scaleTier + 1]
+	if not nextTier then
+		return false
+	end
+	if nextTier.locked then
+		-- Cross-planet teaser stub: cleanly no-op with a hint. Returning
+		-- false triggers PurchasePad's fail-flash for feedback, and the
+		-- floating text explains why (no error, no crash, no state change).
+		FloatingText.Show(board, "Coming soon: Planet Brainrot", Theme.Warning)
+		return false
+	end
+	if not EconomyService.CanAfford(player, nextTier.cost) then
+		FloatingText.Show(board, "Need $" .. NumberFormatter.Format(nextTier.cost) .. "!", Theme.Warning)
+		return false
+	end
+	if not EconomyService.RemoveCash(player, nextTier.cost) then
+		return false
+	end
+	EconomyService.UpdateDogWalking(player, { scaleTier = state.scaleTier + 1 })
+	FloatingText.Show(board, nextTier.name .. "!", Theme.CashPositive)
+	refreshScaleKioskDisplay(player, statusLabel, pad)
+	refreshDogWalkingReward(player)
+	rebuildScaleVisuals(player)
+	return true
+end
+
 -- The "Dog Walker" hired NPC: a primitive blocky figure with a 4th leashed
 -- dog, pacing a short loop near the station so automation feels alive
 -- without any pathfinding.
-local function buildDogWalkerNpc(folder: Instance, base: Vector3): Model
+local function buildDogWalkerNpc(folder: Instance, origin: Vector3): Model
 	local npc = Instance.new("Model")
 	npc.Name = "DogWalkerNpc"
 	npc.Parent = folder
+
+	-- West road (X=-22, on the road near its station-side edge). Yaw -90° so
+	-- local +Z = world +X: the torso "faces" +X (into the park) and the
+	-- patrol below runs along the road in world Z. Kept off the inner
+	-- sidewalk (X=-16) since the Dog Walking kiosks live there.
+	local startCFrame = CFrame.new(origin + Vector3.new(-22, 3, -12)) * CFrame.Angles(0, math.rad(-90), 0)
 
 	local torso = Instance.new("Part")
 	torso.Name = "Torso"
@@ -2387,7 +2780,7 @@ local function buildDogWalkerNpc(folder: Instance, base: Vector3): Model
 	torso.Material = Enum.Material.SmoothPlastic
 	torso.Color = Theme.Secondary
 	torso.Size = Vector3.new(1.4, 2, 0.8)
-	torso.CFrame = CFrame.new(base + Vector3.new(-4, 3, -2))
+	torso.CFrame = startCFrame
 	torso.Parent = npc
 	npc.PrimaryPart = torso
 
@@ -2418,11 +2811,14 @@ local function buildDogWalkerNpc(folder: Instance, base: Vector3): Model
 	if dog then
 		dog.Name = "WalkerDog"
 		dog.Parent = npc
-		scaleAndPositionDog(dog, base + Vector3.new(-5.5, 0, -2), math.rad(90))
+		-- Dog walks slightly ahead of the walker in the patrol direction
+		-- (local -X = world +Z with the yaw above), so as the model reverses
+		-- the pack visually leads.
+		scaleAndPositionDog(dog, (startCFrame * CFrame.new(-1.5, -3, 0)).Position, math.rad(0))
 	end
 
 	local pointA = torso.CFrame
-	local pointB = torso.CFrame * CFrame.new(9, 0, 0)
+	local pointB = torso.CFrame * CFrame.new(-24, 0, 0)
 	loopModelBetweenPoints(npc, pointA, pointB, 4)
 
 	return npc
@@ -2431,7 +2827,7 @@ end
 function IncomeSourceService.AttemptDogWalkingManagerHire(
 	player: Player,
 	folder: Instance,
-	base: Vector3,
+	origin: Vector3,
 	board: BasePart,
 	statusLabel: TextLabel,
 	pad: BasePart
@@ -2453,7 +2849,7 @@ function IncomeSourceService.AttemptDogWalkingManagerHire(
 	pad.Transparency = 0.7
 	FloatingText.Show(board, "Dog Walker Hired!", Theme.CashPositive)
 
-	buildDogWalkerNpc(folder, base)
+	buildDogWalkerNpc(folder, origin)
 	IncomeSourceService.StartDogWalkingManagerLoops(player)
 	return true
 end
@@ -2473,12 +2869,12 @@ function IncomeSourceService.StartDogWalkingManagerLoops(player: Player)
 	end
 end
 
--- Positions for stations 2-3 (Phase 4) - station 1 keeps its original
--- `base` spot. Flanks it, clear of both the original dog tangle and the
--- Value/Speed/Manager kiosk row at base+(x,0,5).
+-- Positions for stations 2-3 (Phase 4). All three Dog Walking stations sit
+-- on the loop's WEST side at X=-30, spaced 20 studs apart in Z. Station 1
+-- is at Z=-20 (see SetupPlayerDogWalking); these two flank it to the north.
 local DOG_WALKING_EXTRA_STATION_OFFSETS = {
-	Vector3.new(-25, 0, 20),
-	Vector3.new(25, 0, 20),
+	Vector3.new(-30, 0, 0),
+	Vector3.new(-30, 0, 20),
 }
 
 -- Standalone (not just a Triggered closure) so it's directly callable, same
@@ -2510,7 +2906,7 @@ function IncomeSourceService.AttemptDogWalkingStationPurchase(
 
 	priceGui:Destroy()
 	local hero = buildDogWalkingStation(player, folder, position, stationIndex)
-	refreshDogWalkingPromptText(player)
+	refreshDogWalkingReward(player)
 
 	PurchaseEffects.ApplyOwnedVisuals({
 		zoneModel = folder,
@@ -2579,16 +2975,20 @@ end
 -- extra stations + the Value/Speed/Manager kiosks in a player's shared
 -- neighborhood plot.
 function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folder, origin: Vector3)
-	local base = origin + Vector3.new(0, 0, 15)
+	-- Station 1 is the always-free starter, southwest slot on the loop.
+	local station1Position = origin + Vector3.new(-30, 0, -20)
 	dogWalkingPlots[player] = { folder = folder, origin = origin, stations = {} }
 
-	buildDogWalkingStation(player, folder, base, 1)
+	buildDogWalkingStation(player, folder, station1Position, 1)
 
 	for i, offset in ipairs(DOG_WALKING_EXTRA_STATION_OFFSETS) do
 		buildDogWalkingStationSlot(player, folder, origin, i + 1, offset, Config.DogWalking.stationCosts[i])
 	end
 
-	local valueBoard, valueStatus, valuePad = buildTierKiosk(folder, base + Vector3.new(-8, 0, 5), "Value", Theme.Brand)
+	-- All 3 Dog Walking kiosks live on the west inner sidewalk of the loop,
+	-- rotated so their readable face points +X (toward the park center).
+	local westKioskYaw = math.rad(-90)
+	local valueBoard, valueStatus, valuePad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, -10)) * CFrame.Angles(0, westKioskYaw, 0), "Value", Theme.Brand)
 	refreshValueKioskDisplay(player, valueStatus, valuePad)
 	PurchasePad.Wire(valuePad, function(p)
 		return p == player
@@ -2596,7 +2996,7 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		return IncomeSourceService.AttemptDogWalkingValueUpgrade(p, valueBoard, valueStatus, valuePad)
 	end, false)
 
-	local speedBoard, speedStatus, speedPad = buildTierKiosk(folder, base + Vector3.new(8, 0, 5), "Speed", Theme.Secondary)
+	local speedBoard, speedStatus, speedPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 10)) * CFrame.Angles(0, westKioskYaw, 0), "Speed", Theme.Secondary)
 	refreshSpeedKioskDisplay(player, speedStatus, speedPad)
 	PurchasePad.Wire(speedPad, function(p)
 		return p == player
@@ -2604,19 +3004,30 @@ function IncomeSourceService.SetupPlayerDogWalking(player: Player, folder: Folde
 		return IncomeSourceService.AttemptDogWalkingSpeedUpgrade(p, speedBoard, speedStatus, speedPad)
 	end, false)
 
-	local managerBoard, managerStatus, managerPad = buildTierKiosk(folder, base + Vector3.new(0, 0, 5), "Manager", Theme.Gold)
+	-- The Scale ladder sits at Z=+18 - past Speed at +10 - since it's Dog
+	-- Walking's late-game endgame track and reads naturally as the "further
+	-- along the sidewalk" kiosk from the player's arrival direction.
+	local scaleBoard, scaleStatus, scalePad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 18)) * CFrame.Angles(0, westKioskYaw, 0), "Scale", Theme.AffordablePulse)
+	refreshScaleKioskDisplay(player, scaleStatus, scalePad)
+	PurchasePad.Wire(scalePad, function(p)
+		return p == player
+	end, function(p)
+		return IncomeSourceService.AttemptDogWalkingScaleUpgrade(p, scaleBoard, scaleStatus, scalePad)
+	end, false)
+
+	local managerBoard, managerStatus, managerPad = buildTierKiosk(folder, CFrame.new(origin + Vector3.new(-16, 0, 0)) * CFrame.Angles(0, westKioskYaw, 0), "Manager", Theme.Gold)
 	local dogWalkingState = EconomyService.GetDogWalkingState(player)
 	if dogWalkingState.hasManager then
 		managerStatus.Text = "HIRED"
 		managerPad.Transparency = 0.7
-		buildDogWalkerNpc(folder, base)
+		buildDogWalkerNpc(folder, origin)
 		IncomeSourceService.StartDogWalkingManagerLoops(player)
 	else
 		managerStatus.Text = "Hire a Dog Walker\n$" .. NumberFormatter.Format(Config.DogWalking.managerCost)
 		PurchasePad.Wire(managerPad, function(p)
 			return p == player
 		end, function(p)
-			return IncomeSourceService.AttemptDogWalkingManagerHire(p, folder, base, managerBoard, managerStatus, managerPad)
+			return IncomeSourceService.AttemptDogWalkingManagerHire(p, folder, origin, managerBoard, managerStatus, managerPad)
 		end, true)
 	end
 end
@@ -2655,7 +3066,7 @@ function IncomeSourceService.AttemptNeighborhoodUpgrade(
 
 	priceGui:Destroy()
 	pad:Destroy()
-	refreshDogWalkingPromptText(player)
+	refreshDogWalkingReward(player)
 
 	local plot = doorDashPlots[player]
 	local doorDashArea = plot and (plot.folder:FindFirstChild("DoorDashArea") :: Instance)
@@ -2693,7 +3104,8 @@ function IncomeSourceService.SetupPlayerNeighborhoodUpgrade(player: Player, fold
 	unlockFloor.Anchored = true
 	unlockFloor.CanCollide = false
 	unlockFloor.Size = Vector3.new(8, 1, 8)
-	unlockFloor.Position = origin + Vector3.new(0, 0.5, -3)
+	-- North inner park, symmetric to the DoorDash unlock/vehicle bay at Z=-18.
+	unlockFloor.Position = origin + Vector3.new(0, 0.5, 18)
 	unlockFloor.Color = Theme.Locked
 	unlockFloor.Material = Enum.Material.Neon
 	unlockFloor.Transparency = 0.5

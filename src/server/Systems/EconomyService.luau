@@ -35,6 +35,9 @@ type DogWalkingState = {
 	-- Which of the 2 extra stations (beyond the always-free station 1) are
 	-- built. Index 1 = station 2, index 2 = station 3.
 	extraStations: { [number]: boolean },
+	-- Sequential Scale ladder: Pack Size → Dog Quality → Exotic Pets. 0 =
+	-- baseline (1 mutt); index into Config.DogWalking.scaleTiers otherwise.
+	scaleTier: number,
 }
 local profiles: {
 	[Player]: {
@@ -62,6 +65,7 @@ local function defaultDogWalking(): DogWalkingState
 		speedTier = 0,
 		hasManager = false,
 		extraStations = {},
+		scaleTier = 0,
 	}
 end
 
@@ -101,10 +105,15 @@ end
 -- LOAD / SAVE
 --------------------------------------------------------------------------------
 
-function EconomyService.LoadPlayer(player: Player)
+-- Returns true if this player has never had a save before (no prior plot
+-- claim, no progress) - PlotService uses this to decide whether they need
+-- to pick a plot in the lobby or can skip straight back into their existing
+-- one.
+function EconomyService.LoadPlayer(player: Player): boolean
 	local ok, saved = withRetry(function()
 		return playerStore:GetAsync("Player_" .. player.UserId)
 	end)
+	local isNewProfile = not (ok and saved)
 
 	profiles[player] = (ok and saved) or defaultProfile()
 	-- Migrates saves from before these progression systems existed.
@@ -137,6 +146,9 @@ function EconomyService.LoadPlayer(player: Player)
 	if not profiles[player].dogWalking.extraStations then
 		profiles[player].dogWalking.extraStations = {}
 	end
+	if not profiles[player].dogWalking.scaleTier then
+		profiles[player].dogWalking.scaleTier = 0
+	end
 	if not profiles[player].neighborhoodTier then
 		profiles[player].neighborhoodTier = 0
 	end
@@ -149,6 +161,8 @@ function EconomyService.LoadPlayer(player: Player)
 	cashValue.Name = "Cash"
 	cashValue.Value = profiles[player].cash
 	cashValue.Parent = leaderstats
+
+	return isNewProfile
 end
 
 function EconomyService.SavePlayer(player: Player)
